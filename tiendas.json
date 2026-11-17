@@ -64,7 +64,8 @@
     "convertidor",
     "presión",
     "juguete",
-    "stitch"
+    "stitch",
+    "outlet"
   ],
   "busquedas": [
     {
@@ -158,6 +159,23 @@
       "nombre": "Rodo",
       "url": "https://www.rodo.com.ar",
       "lector": "magento"
+    },
+    {
+      "nombre": "Compra Gamer",
+      "url": "https://compragamer.com",
+      "lector": "compragamer"
+    },
+    {
+      "nombre": "Tienda Newsan",
+      "url": "https://tiendanewsan.com.ar",
+      "lector": "magento_categorias",
+      "cada_horas": 1
+    },
+    {
+      "nombre": "Gadnic",
+      "url": "https://www.gadnic.com.ar",
+      "lector": "gadnic",
+      "cada_horas": 3
     }
   ],
   "candidatas": [
@@ -172,11 +190,6 @@
       "rubro": "electro"
     },
     {
-      "nombre": "Tienda Newsan",
-      "url": "https://www.tiendanewsan.com.ar",
-      "rubro": "electro"
-    },
-    {
       "nombre": "Coto Digital",
       "url": "https://www.cotodigital.com.ar",
       "rubro": "electro"
@@ -185,12 +198,6 @@
       "nombre": "Easy",
       "url": "https://www.easy.com.ar",
       "rubro": "electro"
-    },
-    {
-      "nombre": "Compra Gamer",
-      "url": "https://compragamer.com",
-      "rubro": "computacion",
-      "prueba": "monitor"
     },
     {
       "nombre": "Full H4rd",

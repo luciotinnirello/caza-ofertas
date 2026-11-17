@@ -369,11 +369,99 @@ def leer_magento(tienda, termino, max_paginas):
     return salida
 
 
+def interpretar_compragamer(tienda, productos, marcas, subcategorias):
+    salida = []
+    for d in productos or []:
+        precio = numero(d.get("precioLista")) or numero(d.get("precioEspecial"))
+        if (not precio or not d.get("vendible") or (d.get("stock") or 0) <= 0
+                or d.get("visible_solo_en_ATPC") or d.get("visible_solo_en_combo")):
+            continue
+        nombre = d.get("nombre", "") + (" [Outlet]" if d.get("es_outlet") else "")
+        slug = re.sub(r"[^A-Za-z0-9]+", "_", d.get("nombre", "")).strip("_")
+        salida.append(_producto(
+            tienda, d.get("id_producto"), nombre, precio, numero(d.get("precioListaAnterior")),
+            f"https://compragamer.com/producto/{slug}_{d.get('id_producto')}",
+            marcas.get(d.get("id_marca"), ""), "", "", subcategorias.get(d.get("id_subcategoria"), ""), True))
+    return salida
+
+
+def leer_compragamer(tienda, termino, max_paginas):
+    base = "https://static.compragamer.com/"
+    marcas = {m["id"]: m.get("nombre", "") for m in json.loads(descargar(base + "marcas")) if m.get("id")}
+    subs = {x["id"]: (x.get("subCate") or "").strip() for x in json.loads(descargar(base + "subcategorias"))}
+    return interpretar_compragamer(tienda, json.loads(descargar(base + "productos")), marcas, subs)
+
+
+_RE_GADNIC = re.compile(r"""<a href="(/[^"]+)" class="bloque-blanco"[^>]*?data-product='([^']*)'""", re.S)
+
+
+def interpretar_gadnic(tienda, texto):
+    salida = []
+    for href, crudo in _RE_GADNIC.findall(texto):
+        try:
+            d = json.loads(html.unescape(crudo))
+        except ValueError:
+            continue
+        precio = numero(d.get("precio"))
+        if not precio or d.get("en_pausa") or (d.get("stock") or 0) <= 0:
+            continue
+        ean = next((m.get("ean") for m in d.get("modelos") or [] if m.get("ean")), "")
+        salida.append(_producto(
+            tienda, d.get("id"), d.get("post_title"), precio, numero(d.get("precio_tachado")),
+            tienda["url"].rstrip("/") + href, d.get("marca", ""), ean, "",
+            d.get("categoria_principal_name", ""), True))
+    return salida
+
+
+def _recorrer_categorias(tienda, enlaces, interpretar, paginar=None, max_paginas=1):
+    salida, vistos = [], set()
+    for enlace in enlaces:
+        for pag in range(1, max_paginas + 1):
+            url = paginar(enlace, pag) if paginar else enlace
+            try:
+                nuevos = [p for p in interpretar(tienda, descargar(url, intentos=1)) if p["sku"] not in vistos]
+            except Exception:  # noqa: BLE001
+                break
+            for p in nuevos:
+                if not p["cat_real"]:
+                    p["cat_real"] = enlace.rstrip("/").rsplit("/", 1)[-1].replace(".html", "")
+            vistos.update(p["sku"] for p in nuevos)
+            salida.extend(nuevos)
+            time.sleep(PAUSA / 2)
+            if not nuevos:
+                break
+    return salida
+
+
+def leer_gadnic(tienda, termino, max_paginas):
+    base = tienda["url"].rstrip("/")
+    home = descargar(base)
+    cats = sorted(set(re.findall(r'href="(/[a-z0-9-]+)"', home)))
+    return _recorrer_categorias(tienda, [base + c for c in cats][:300], interpretar_gadnic)
+
+
+def leer_magento_categorias(tienda, termino, max_paginas):
+    """Magento sin buscador util: recorre las categorias principales del menu."""
+    base = tienda["url"].rstrip("/")
+    cats = tienda.get("categorias")
+    if not cats:
+        home = descargar(base)
+        cats = (re.findall(r'<a href="([^"]+\.html)"[^>]*class="see-all-link"', home)
+                or re.findall(r'<a href="([^"]+\.html)"[^>]*class="level-top"', home))
+        cats = [c for c in dict.fromkeys(cats) if "tienda-de-marca" not in c]
+    return _recorrer_categorias(tienda, cats, interpretar_magento,
+                                lambda u, p: f"{u}?p={p}", tienda.get("max_paginas_categoria", 25))
+
+
+LECTORES_CATALOGO = {"shopify": leer_shopify, "compragamer": leer_compragamer, "gadnic": leer_gadnic,
+                     "magento_categorias": leer_magento_categorias}
+
+
 def leer(tienda, termino, max_paginas):
     """Devuelve (productos, lector_usado)."""
     modo = tienda.get("lector", "auto")
-    if modo == "shopify":
-        return leer_shopify(tienda, termino, max_paginas), "shopify"
+    if modo in LECTORES_CATALOGO:
+        return LECTORES_CATALOGO[modo](tienda, termino, max_paginas), modo
     if modo == "magento":
         return leer_magento(tienda, termino, max_paginas), "magento"
     if modo in ("vtex", "auto"):
@@ -401,6 +489,7 @@ def abrir(ruta):
             tienda TEXT, sku TEXT, fecha TEXT, precio REAL, lista REAL);
         CREATE INDEX IF NOT EXISTS i_precios ON precios(tienda, sku, fecha);
         CREATE INDEX IF NOT EXISTS i_clave ON productos(clave);
+        CREATE TABLE IF NOT EXISTS meta(clave TEXT PRIMARY KEY, valor TEXT);
         CREATE TABLE IF NOT EXISTS alertas(
             tienda TEXT, sku TEXT, tipo TEXT, precio REAL, fecha TEXT,
             PRIMARY KEY(tienda, sku, tipo, precio));
@@ -636,11 +725,16 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     for tienda in cfg["tiendas"]:
         if not tienda.get("activa", True):
             continue
+        if tienda.get("cada_horas"):
+            ult = c.execute("SELECT valor FROM meta WHERE clave=?", ("ultima:" + tienda["nombre"],)).fetchone()
+            if ult and (ahora - _fecha(ult[0])).total_seconds() < tienda["cada_horas"] * 3600 - 600:
+                print(f"{tienda['nombre']}: se saltea (corre cada {tienda['cada_horas']} h)")
+                continue
         total, errores = 0, 0
         # primera carga de una tienda: se guarda todo pero no se avisa (serian cientos de "nuevos")
         estreno = not c.execute("SELECT 1 FROM productos WHERE tienda=? LIMIT 1", (tienda["nombre"],)).fetchone()
         busquedas = cfg["busquedas"]
-        if tienda.get("lector") == "shopify":
+        if tienda.get("lector") in LECTORES_CATALOGO:
             busquedas = [{"termino": "*", "categoria": ""}]
         for b in busquedas:
             try:
@@ -658,6 +752,8 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
                 if hist is not None and not estreno:
                     cambiados.append((p, hist, b))
             time.sleep(PAUSA if lector is leer else 0)
+        if total:
+            c.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", ("ultima:" + tienda["nombre"], ahora.isoformat()))
         c.commit()
         resumen.append(f"{tienda['nombre']}: {total} productos" + (f", {errores} errores" if errores else "")
                        + (" (primera carga, sin alertas)" if estreno else ""))

@@ -92,6 +92,43 @@ class Lectores(unittest.TestCase):
         self.assertEqual((p[0]["sku"], p[0]["precio"], p[0]["lista"]), ("39697", 750000, 900000))
         self.assertEqual(p[0]["titulo"], "Aire Acondicionado Hyundai HY11NV-3200FCW")
 
+    def test_compragamer(self):
+        prods = [{"id_producto": 1674, "nombre": "Estabilizador TCA-1200N LYONN", "id_subcategoria": 31, "id_marca": 63,
+                  "precioEspecial": 42890, "precioLista": 47656, "precioListaAnterior": None, "vendible": 1, "stock": 10},
+                 {"id_producto": 2, "nombre": "Sin stock", "precioLista": 10, "vendible": 1, "stock": 0}]
+        p = r.interpretar_compragamer(T, prods, {63: "Lyonn"}, {31: "Estabilizadores"})
+        self.assertEqual(len(p), 1)
+        self.assertEqual((p[0]["precio"], p[0]["marca"], p[0]["cat_real"]), (47656, "Lyonn", "Estabilizadores"))
+        self.assertEqual(p[0]["url"], "https://compragamer.com/producto/Estabilizador_TCA_1200N_LYONN_1674")
+
+    def test_gadnic(self):
+        import html as h
+        d = {"id": 46666, "post_title": "Aire Portátil Gadnic 2300 Frigorías", "precio": 579999, "precio_tachado": 724999,
+             "marca": "Gadnic", "stock": 5, "en_pausa": 0, "categoria_principal_name": "Aires Acondicionados",
+             "modelos": [{"ean": "7799219155399"}]}
+        pagina = ('<a href="/aires-acondicionados/aire-portatil" class="bloque-blanco" title=\'x\' data-item-id="A" '
+                  "data-product='" + h.escape(json.dumps(d)) + "'>")
+        p = r.interpretar_gadnic({"nombre": "Gadnic", "url": "https://www.gadnic.com.ar"}, pagina)
+        self.assertEqual(len(p), 1)
+        self.assertEqual((p[0]["precio"], p[0]["lista"], p[0]["ean"]), (579999, 724999, "7799219155399"))
+        self.assertEqual(p[0]["url"], "https://www.gadnic.com.ar/aires-acondicionados/aire-portatil")
+
+    def test_cada_horas(self):
+        cfg = {"tiendas": [{"nombre": "A", "url": "https://a.test", "cada_horas": 3}],
+               "busquedas": [{"termino": "x"}]}
+        llamadas = []
+
+        def lector(tienda, termino, mp):
+            llamadas.append(1)
+            return [r._producto(tienda, "1", "Producto ABC123XY", 1000)], "prueba"
+
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "p.db")
+            t0 = datetime(2026, 11, 1, tzinfo=timezone.utc)
+            for h in (0, 0.5, 1, 3, 3.5):
+                r.correr(cfg, db, t0 + timedelta(hours=h), lector)
+            self.assertEqual(len(llamadas), 2)
+
     def test_plataforma(self):
         self.assertEqual(r.detectar_plataforma('<img src="https://x.vtexassets.com/a.png">'), "VTEX")
         self.assertEqual(r.detectar_plataforma("<html></html>"), "desconocida")
