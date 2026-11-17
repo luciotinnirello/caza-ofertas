@@ -138,8 +138,8 @@ def _producto(tienda, sku, titulo, precio, lista=None, url="", marca="", ean="",
     div = float(tienda.get("divisor", 1) or 1)
     precio = precio / div if precio else None
     lista = lista / div if lista else None
-    if lista and precio and lista <= precio:
-        lista = None
+    if lista and precio and (lista <= precio or lista > precio * 5):
+        lista = None  # sin descuento, o precio de lista imposible (dato basura de la tienda)
     return {"tienda": tienda["nombre"], "sku": str(sku), "titulo": (titulo or "").strip(),
             "precio": precio, "lista": lista, "url": url, "marca": (marca or "").strip(),
             "ean": str(ean or ""), "vendedor": vendedor or ""}
@@ -513,8 +513,9 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     for p, hist, b in cambiados:
         accesorio = es_accesorio(p["titulo"], excluir)
         titulo = p["titulo"].lower()
-        aplica_piso = (not accesorio and b.get("piso")
-                       and any(w.lower() in titulo for w in b.get("debe_contener", [b["termino"]])))
+        inicio = " ".join(titulo.replace("\xa0", " ").split()[:3])
+        aplica_piso = (not accesorio and b.get("piso") and " para " not in titulo
+                       and any(w.lower() in inicio for w in b.get("debe_contener", [b["termino"]])))
         clave = clave_modelo(p["titulo"], p["marca"], p["ean"])
         otras = [] if accesorio else precios_otras_tiendas(c, clave, p["tienda"], ahora)
         al = evaluar(p["precio"], p["lista"], hist, otras, reglas, b["piso"] if aplica_piso else None)
