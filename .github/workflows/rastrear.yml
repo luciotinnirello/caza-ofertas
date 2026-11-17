@@ -9,9 +9,12 @@ on:
         description: "Que ejecutar"
         type: choice
         default: correr
-        options: [correr, diagnostico, sonda]
+        options: [correr, diagnostico, sonda, ver]
       urls:
         description: "Solo para sonda: direcciones separadas por espacio"
+        default: ""
+      patron:
+        description: "Solo para ver: expresion a buscar"
         default: ""
 
 concurrency:
@@ -48,6 +51,7 @@ jobs:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SONDA_URLS: ${{ github.event.inputs.urls }}
+          VER_PATRON: ${{ github.event.inputs.patron }}
         run: python rastreador.py "${{ github.event.inputs.modo || 'correr' }}"
 
       - name: Guardar el historial (un solo commit, no engorda el repo)

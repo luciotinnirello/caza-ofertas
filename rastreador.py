@@ -802,15 +802,50 @@ def sonda(urls, termino="notebook"):
             time.sleep(PAUSA)
 
 
+def ver(urls, patron=""):
+    """Baja paginas y muestra su estructura, para investigar tiendas nuevas."""
+    for url in urls:
+        print(f"\n===== {url}")
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "es-AR,es;q=0.9",
+                                                       "Accept": "text/html,application/json,*/*"})
+            with urllib.request.urlopen(req, timeout=30) as r:
+                final, tipo, txt = r.geturl(), r.headers.get("Content-Type"), r.read().decode("utf-8", "replace")
+        except Exception as e:  # noqa: BLE001
+            print(f"ERROR {type(e).__name__} {getattr(e, 'code', '')} {e}")
+            continue
+        print(f"final: {final} | {tipo} | {len(txt)} bytes")
+        if patron:
+            vistos = set()
+            for m in re.finditer(patron, txt):
+                frag = re.sub(r"\s+", " ", txt[max(0, m.start() - 150):m.end() + 250])
+                if frag[:80] not in vistos:
+                    vistos.add(frag[:80])
+                    print("  >> " + frag)
+                if len(vistos) >= 12:
+                    break
+        else:
+            hrefs = sorted({h.split("?")[0] for h in re.findall(r'href="([^"#]+)"', txt)
+                            if not re.search(r"\.(css|png|jpg|svg|ico|woff2?|webp)$", h)})
+            print(f"hrefs ({len(hrefs)}): " + " ".join(hrefs[:90]))
+            print("scripts: " + " ".join(sorted(set(re.findall(r'<script[^>]*src="([^"]+)"', txt)))[:25]))
+            print("forms: " + " | ".join(re.findall(r"<form[^>]*>", txt)[:6]))
+            print("inicio: " + re.sub(r"\s+", " ", txt[:400]))
+        time.sleep(PAUSA)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("comando", nargs="?", default="correr", choices=["correr", "diagnostico", "sonda"])
+    ap.add_argument("comando", nargs="?", default="correr", choices=["correr", "diagnostico", "sonda", "ver"])
+    ap.add_argument("--patron", default=os.environ.get("VER_PATRON", ""))
     ap.add_argument("--urls", default=os.environ.get("SONDA_URLS", ""))
     ap.add_argument("--config", default="tiendas.json")
     ap.add_argument("--db", default="data/precios.db")
     a = ap.parse_args()
     with open(a.config, encoding="utf-8") as f:
         cfg = json.load(f)
+    if a.comando == "ver":
+        return ver(a.urls.split(), a.patron)
     if a.comando == "sonda":
         return sonda(a.urls.split())
     if a.comando == "diagnostico":
