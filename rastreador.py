@@ -298,9 +298,84 @@ def leer_html(tienda, termino, max_paginas):
     return salida
 
 
+def interpretar_shopify(tienda, datos):
+    salida = []
+    base = tienda["url"].rstrip("/")
+    for prod in (datos or {}).get("products") or []:
+        for v in prod.get("variants") or []:
+            precio = numero(v.get("price"))
+            if not precio or v.get("available") is False:
+                continue
+            titulo = prod.get("title", "")
+            if v.get("title") and v["title"] != "Default Title":
+                titulo += " " + v["title"]
+            salida.append(_producto(
+                tienda, v.get("id"), titulo, precio, numero(v.get("compare_at_price")),
+                f"{base}/products/{prod.get('handle', '')}", prod.get("vendor", ""), v.get("barcode") or "",
+                "", prod.get("product_type", ""), True))
+    return salida
+
+
+def leer_shopify(tienda, termino, max_paginas):
+    """Shopify publica el catalogo completo; el termino no se usa."""
+    base = tienda["url"].rstrip("/")
+    salida = []
+    for pag in range(1, tienda.get("max_paginas_catalogo", 30) + 1):
+        datos = json.loads(descargar(f"{base}/products.json?limit=250&page={pag}"))
+        if not datos.get("products"):
+            break
+        salida.extend(interpretar_shopify(tienda, datos))
+        time.sleep(PAUSA)
+    return salida
+
+
+_RE_MAGENTO_LINK = re.compile(r'<a[^>]*class="product-item-link"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
+_RE_MAGENTO_LINK2 = re.compile(r'<a[^>]*href="([^"]+)"[^>]*class="product-item-link"[^>]*>(.*?)</a>', re.S)
+
+
+def interpretar_magento(tienda, texto):
+    salida = []
+    for bloque in re.split(r'class="[^"]*product-item-info', texto)[1:]:
+        m = _RE_MAGENTO_LINK.search(bloque) or _RE_MAGENTO_LINK2.search(bloque)
+        if not m:
+            continue
+        precios = {}
+        for tag in re.findall(r"<span[^>]*data-price-amount=[^>]*>", bloque):
+            monto = re.search(r'data-price-amount="([\d.]+)"', tag)
+            tipo = re.search(r'data-price-type="(\w+)"', tag)
+            if monto:
+                precios.setdefault(tipo.group(1) if tipo else "finalPrice", numero(monto.group(1)))
+        precio = precios.get("finalPrice") or precios.get("minPrice")
+        if not precio:
+            continue
+        pid = re.search(r'data-product-id="(\d+)"', bloque)
+        titulo = html.unescape(re.sub(r"<[^>]+>", "", m.group(2))).strip()
+        salida.append(_producto(tienda, pid.group(1) if pid else m.group(1), titulo, precio,
+                                precios.get("oldPrice"), html.unescape(m.group(1)), propio=True))
+    return salida
+
+
+def leer_magento(tienda, termino, max_paginas):
+    base = tienda["url"].rstrip("/")
+    salida, vistos = [], set()
+    for pag in range(1, max_paginas + 1):
+        url = f"{base}/catalogsearch/result/?q={urllib.parse.quote(termino)}&p={pag}"
+        nuevos = [p for p in interpretar_magento(tienda, descargar(url)) if p["sku"] not in vistos]
+        if not nuevos:
+            break
+        vistos.update(p["sku"] for p in nuevos)
+        salida.extend(nuevos)
+        time.sleep(PAUSA)
+    return salida
+
+
 def leer(tienda, termino, max_paginas):
     """Devuelve (productos, lector_usado)."""
     modo = tienda.get("lector", "auto")
+    if modo == "shopify":
+        return leer_shopify(tienda, termino, max_paginas), "shopify"
+    if modo == "magento":
+        return leer_magento(tienda, termino, max_paginas), "magento"
     if modo in ("vtex", "auto"):
         try:
             prods = leer_vtex(tienda, termino, max_paginas)
@@ -372,9 +447,27 @@ def mediana_ponderada(pares):
     return pares[-1][0]
 
 
+_MARCAS = {}
+
+
+def inferir_marca(c, titulo):
+    """Si la tienda no informa la marca, la busca en el titulo entre las marcas ya conocidas."""
+    if id(c) not in _MARCAS:
+        _MARCAS.clear()
+        _MARCAS[id(c)] = {m.lower(): m for (m,) in c.execute(
+            "SELECT DISTINCT marca FROM productos WHERE marca!='' AND length(marca)>=3")}
+    conocidas = _MARCAS[id(c)]
+    for palabra in re.findall(r"[A-Za-z][A-Za-z0-9&\-]{2,}", titulo or ""):
+        if palabra.lower() in conocidas:
+            return conocidas[palabra.lower()]
+    return ""
+
+
 def guardar(c, p, categoria, ahora, dias_hist):
     """Registra una observacion. Devuelve None si no hubo cambio, o el historial previo."""
     t, sku, iso = p["tienda"], p["sku"], ahora.isoformat()
+    if not p["marca"]:
+        p["marca"] = inferir_marca(c, p["titulo"])
     clave = clave_modelo(p["titulo"], p["marca"], p["ean"])
     fila = c.execute("SELECT ultimo_precio, ultima_lista FROM productos WHERE tienda=? AND sku=?",
                      (t, sku)).fetchone()
@@ -544,7 +637,12 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
         if not tienda.get("activa", True):
             continue
         total, errores = 0, 0
-        for b in cfg["busquedas"]:
+        # primera carga de una tienda: se guarda todo pero no se avisa (serian cientos de "nuevos")
+        estreno = not c.execute("SELECT 1 FROM productos WHERE tienda=? LIMIT 1", (tienda["nombre"],)).fetchone()
+        busquedas = cfg["busquedas"]
+        if tienda.get("lector") == "shopify":
+            busquedas = [{"termino": "*", "categoria": ""}]
+        for b in busquedas:
             try:
                 prods, _ = lector(tienda, b["termino"], cfg.get("max_paginas", 4))
             except Exception as e:  # noqa: BLE001
@@ -557,11 +655,12 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
                 vistos.add((p["tienda"], p["sku"]))
                 total += 1
                 hist = guardar(c, p, b.get("categoria", ""), ahora, reglas["dias_historial"])
-                if hist is not None:
+                if hist is not None and not estreno:
                     cambiados.append((p, hist, b))
             time.sleep(PAUSA if lector is leer else 0)
         c.commit()
-        resumen.append(f"{tienda['nombre']}: {total} productos" + (f", {errores} errores" if errores else ""))
+        resumen.append(f"{tienda['nombre']}: {total} productos" + (f", {errores} errores" if errores else "")
+                       + (" (primera carga, sin alertas)" if estreno else ""))
         print(resumen[-1])
 
     pendientes = []

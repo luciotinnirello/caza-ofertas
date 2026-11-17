@@ -148,6 +148,16 @@
       "busqueda": "https://www.musimundo.com/search?text={q}&page={p}",
       "activa": false,
       "nota": "Falta lector propio"
+    },
+    {
+      "nombre": "Tio Musa",
+      "url": "https://www.tiomusa.com.ar",
+      "lector": "shopify"
+    },
+    {
+      "nombre": "Rodo",
+      "url": "https://www.rodo.com.ar",
+      "lector": "magento"
     }
   ],
   "candidatas": [

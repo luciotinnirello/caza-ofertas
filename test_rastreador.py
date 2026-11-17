@@ -69,6 +69,29 @@ class Lectores(unittest.TestCase):
         self.assertEqual(p["503075"]["lista"], 489999)
         self.assertEqual(p["503075"]["url"], "https://tienda.test/p/tv-noblex-503075/")
 
+    def test_shopify(self):
+        datos = {"products": [{"title": "Smart Tv Kanji KJ-32MT005", "handle": "tv-kanji", "vendor": "Kanji",
+                               "product_type": "Televisores", "variants": [
+                                   {"id": 1, "title": "Default Title", "price": "289999.00",
+                                    "compare_at_price": "369999.00", "available": True},
+                                   {"id": 2, "title": "Negro", "price": "1.00", "available": False}]}]}
+        p = r.interpretar_shopify(T, datos)
+        self.assertEqual(len(p), 1)
+        self.assertEqual((p[0]["precio"], p[0]["lista"], p[0]["cat_real"]), (289999, 369999, "Televisores"))
+        self.assertEqual(p[0]["url"], "https://tienda.test/products/tv-kanji")
+
+    def test_magento(self):
+        pagina = """<li class="item product product-item"><div class="product-item-info" data-container="product-grid">
+          <strong><a class="product-item-link" href="https://tienda.test/aire-hyundai.html"> Aire Acondicionado Hyundai HY11NV-3200FCW </a></strong>
+          <div class="price-box" data-product-id="39697"><span class="special-price">
+          <span id="product-price-39697" data-price-amount="750000" data-price-type="finalPrice" class="price-wrapper "><span class="price">$750,000.00</span></span></span>
+          <span class="old-price"><span id="old-price-39697" data-price-amount="900000" data-price-type="oldPrice" class="price-wrapper "></span></span></div></div></li>
+          <li class="item product product-item"><div class="product-item-info"><a class="product-item-link" href="/x.html">Sin precio</a></div></li>"""
+        p = r.interpretar_magento(T, pagina)
+        self.assertEqual(len(p), 1)
+        self.assertEqual((p[0]["sku"], p[0]["precio"], p[0]["lista"]), ("39697", 750000, 900000))
+        self.assertEqual(p[0]["titulo"], "Aire Acondicionado Hyundai HY11NV-3200FCW")
+
     def test_plataforma(self):
         self.assertEqual(r.detectar_plataforma('<img src="https://x.vtexassets.com/a.png">'), "VTEX")
         self.assertEqual(r.detectar_plataforma("<html></html>"), "desconocida")
