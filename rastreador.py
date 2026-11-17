@@ -392,7 +392,7 @@ def leer_compragamer(tienda, termino, max_paginas):
     return interpretar_compragamer(tienda, json.loads(descargar(base + "productos")), marcas, subs)
 
 
-_RE_GADNIC = re.compile(r"""<a href="(/[^"]+)" class="bloque-blanco"[^>]*?data-product='([^']*)'""", re.S)
+_RE_GADNIC = re.compile(r"""<a\s+href="(/[^"]+)"\s+class="bloque-blanco"[^>]*?data-product='([^']*)'""", re.S)
 
 
 def interpretar_gadnic(tienda, texto):
@@ -717,6 +717,9 @@ def armar_mensaje(p, alertas):
 
 def correr(cfg, ruta_db, ahora=None, lector=leer):
     ahora = ahora or datetime.now(timezone.utc)
+    solo = os.environ.get("SOLO_TIENDA", "").strip().lower()
+    if solo:
+        cfg = dict(cfg, tiendas=[dict(t, cada_horas=0) for t in cfg["tiendas"] if t["nombre"].lower() == solo])
     reglas = dict(REGLAS)
     reglas.update(cfg.get("reglas") or {})
     excluir = cfg.get("excluir_titulos") or []

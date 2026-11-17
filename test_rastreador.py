@@ -106,7 +106,7 @@ class Lectores(unittest.TestCase):
         d = {"id": 46666, "post_title": "Aire Portátil Gadnic 2300 Frigorías", "precio": 579999, "precio_tachado": 724999,
              "marca": "Gadnic", "stock": 5, "en_pausa": 0, "categoria_principal_name": "Aires Acondicionados",
              "modelos": [{"ean": "7799219155399"}]}
-        pagina = ('<a href="/aires-acondicionados/aire-portatil" class="bloque-blanco" title=\'x\' data-item-id="A" '
+        pagina = ('<a  href="/aires-acondicionados/aire-portatil"\n   class="bloque-blanco" title=\'x\' data-item-id="A" '
                   "data-product='" + h.escape(json.dumps(d)) + "'>")
         p = r.interpretar_gadnic({"nombre": "Gadnic", "url": "https://www.gadnic.com.ar"}, pagina)
         self.assertEqual(len(p), 1)

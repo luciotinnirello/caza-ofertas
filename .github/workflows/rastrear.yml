@@ -13,6 +13,9 @@ on:
       urls:
         description: "Solo para sonda: direcciones separadas por espacio"
         default: ""
+      solo:
+        description: "Solo para correr: nombre de una unica tienda"
+        default: ""
       patron:
         description: "Solo para ver: expresion a buscar"
         default: ""
@@ -52,6 +55,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           SONDA_URLS: ${{ github.event.inputs.urls }}
           VER_PATRON: ${{ github.event.inputs.patron }}
+          SOLO_TIENDA: ${{ github.event.inputs.solo }}
         run: python rastreador.py "${{ github.event.inputs.modo || 'correr' }}"
 
       - name: Guardar el historial (un solo commit, no engorda el repo)
