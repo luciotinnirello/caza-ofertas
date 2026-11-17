@@ -79,6 +79,6 @@ jobs:
         run: |
           sleep 1200
           otras=$(gh api "repos/${{ github.repository }}/actions/runs?per_page=20" \
-            --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }}) | select(.status=="queued" or .status=="pending" or .status=="in_progress" or .status=="waiting")] | length')
-          if [ "$otras" -gt 0 ]; then echo "Ya hay otra corrida en marcha; no se encadena."; exit 0; fi
+            --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }}) | select(.status=="queued" or .status=="pending" or .status=="waiting")] | length')
+          if [ "$otras" -gt 0 ]; then echo "Ya hay otra corrida esperando turno; no se encadena."; exit 0; fi
           gh workflow run rastrear.yml --repo "${{ github.repository }}" --ref main -f modo=correr -f cadena=si
