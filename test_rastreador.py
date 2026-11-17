@@ -225,14 +225,15 @@ class Deteccion(unittest.TestCase):
         self.assertEqual(self.tipos(430000, None, self.H, []), ["MINIMO HISTORICO"])
 
     def test_poca_historia_no_avisa(self):
-        self.assertEqual(self.tipos(200000, None, [(500000, None, 0.5)], []), [])
+        self.assertEqual(self.tipos(200000, None, [(500000, None, 0.2)], []), [])
+        self.assertEqual(self.tipos(200000, None, [(500000, None, 0.6)], []), ["POSIBLE BUG"])
 
     def test_descuento_inflado(self):
         self.assertEqual(self.tipos(500000, 800000, self.H, []), ["DESCUENTO INFLADO"])
 
     def test_descuento_real_no_es_inflado(self):
-        h = [(800000, None, 20), (500000, 800000, 10)]
-        self.assertEqual(self.tipos(499000, 800000, h, []), [])
+        h = [(800000, None, 20), (560000, 800000, 10)]
+        self.assertEqual(self.tipos(559000, 800000, h, []), [])
 
     def test_descuento_extremo_sin_historia(self):
         self.assertEqual(self.tipos(100000, 500000, [], []), ["DESCUENTO EXTREMO"])

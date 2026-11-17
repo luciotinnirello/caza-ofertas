@@ -668,8 +668,8 @@ def precios_vecinos(c, p, ahora, reglas, dias=7):
 
 REGLAS = {
     "dias_historial": 60,       # ventana de historia que se mira
-    "caida_bug": 0.45,          # cae 45% o mas contra su precio habitual -> posible bug
-    "min_dias_caida": 2,        # dias de historia necesarios para esa regla
+    "caida_bug": 0.35,          # cae 35% o mas contra su precio habitual -> posible bug
+    "min_dias_caida": 0.25,     # dias de historia necesarios para esa regla (6 horas)
     "descuento_extremo": 0.70,  # 70% o mas contra el precio de lista publicado
     "minimo_historico": 0.10,   # 10% por debajo del minimo anterior -> oferta real
     "min_dias_minimo": 7,
@@ -858,7 +858,28 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     # barrido diario: compara contra otras tiendas aunque el precio no haya cambiado
     ult = c.execute("SELECT valor FROM meta WHERE clave='barrido'").fetchone()
     barrido = not ult or (ahora - _fecha(ult[0])).total_seconds() >= reglas["horas_barrido"] * 3600
+    ventana_bajas = 1
+    if not c.execute("SELECT 1 FROM meta WHERE clave='reglas_v2'").fetchone():
+        barrido, ventana_bajas = True, 1.5  # una vez: revisar las bajas que la regla anterior no aviso
+        c.execute("INSERT INTO meta VALUES('reglas_v2', '1')")
     if barrido:
+        # bajas fuertes del ultimo dia que no se avisaron (por ejemplo, por falta de historial en ese momento)
+        desde_b = (ahora - timedelta(days=ventana_bajas)).isoformat()
+        for t_b, sku_b, f_b, precio_b, lista_b in c.execute(
+                "SELECT p.tienda, p.sku, p.fecha, p.precio, p.lista FROM precios p JOIN productos q "
+                "ON q.tienda=p.tienda AND q.sku=p.sku WHERE p.fecha>=? AND abs(q.ultimo_precio-p.precio)<0.5 "
+                "AND p.fecha=(SELECT max(fecha) FROM precios x WHERE x.tienda=p.tienda AND x.sku=p.sku)",
+                (desde_b,)).fetchall():
+            hist_b = historial(c, t_b, sku_b, _fecha(f_b), reglas["dias_historial"])
+            al_b = [a for a in evaluar(precio_b, lista_b, hist_b, [], reglas) if a[0] == "POSIBLE BUG"]
+            fila = c.execute("SELECT titulo, marca, url, vendedor, propio FROM productos WHERE tienda=? AND sku=?",
+                             (t_b, sku_b)).fetchone()
+            p_b = {"tienda": t_b, "sku": sku_b, "titulo": fila[0], "marca": fila[1] or "", "url": fila[2],
+                   "vendedor": fila[3] or "", "precio": precio_b, "lista": lista_b, "ean": "", "propio": fila[4],
+                   "cat_real": ""}
+            nuevas = [a for a in al_b if not ya_avisada(c, p_b, a[0])]
+            if nuevas and (t_b, sku_b) not in {(p["tienda"], p["sku"]) for p, _ in pendientes}:
+                pendientes.append((p_b, nuevas))
         desde = (ahora - timedelta(days=1)).isoformat()
         cols = ("tienda", "sku", "titulo", "marca", "url", "vendedor", "ultimo_precio", "ultima_lista", "propio")
         for fila in c.execute(f"SELECT {', '.join(cols)} FROM productos WHERE (clave!='' OR modelo!='') "
