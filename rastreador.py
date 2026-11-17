@@ -654,14 +654,66 @@ def diagnostico(cfg, salida_md):
             f.write(texto)
 
 
+PATRONES_BUSQUEDA = [
+    "{base}/catalogsearch/result/?q={q}&p={p}",        # Magento
+    "{base}/search/?q={q}&page={p}",                    # Tiendanube
+    "{base}/?s={q}&post_type=product&paged={p}",        # WooCommerce
+    "{base}/search?q={q}&type=product&page={p}",        # Shopify
+    "{base}/buscar?q={q}&page={p}",
+    "{base}/{q}?page={p}",                              # VTEX (pagina)
+]
+
+
+def sonda(urls, termino="notebook"):
+    """Inspecciona tiendas desconocidas: plataforma, VTEX y patrones de busqueda."""
+    for base in urls:
+        base = base.rstrip("/")
+        t = {"nombre": base, "url": base}
+        print(f"\n===== {base}")
+        try:
+            home = descargar(base, intentos=1)
+            marcas = [m for _, ms in _MARCAS_PLATAFORMA for m in ms if m in home.lower()]
+            print(f"home ok {len(home)} bytes | plataforma: {detectar_plataforma(home)} | marcas: {marcas}")
+        except Exception as e:  # noqa: BLE001
+            print(f"home ERROR {type(e).__name__} {getattr(e, 'code', '')} {e}")
+            continue
+        try:
+            pv = leer_vtex(t, termino, 1)
+            print(f"vtex api: {len(pv)} productos" + (f" | {pv[0]['titulo'][:50]} {pesos(pv[0]['precio'])}" if pv else ""))
+        except Exception as e:  # noqa: BLE001
+            print(f"vtex api: no ({getattr(e, 'code', type(e).__name__)})")
+        for pat in PATRONES_BUSQUEDA:
+            url = pat.format(base=base, q=urllib.parse.quote(termino), p=1)
+            try:
+                txt = descargar(url, intentos=1)
+            except Exception as e:  # noqa: BLE001
+                print(f"  {pat.split('}', 1)[1][:28]:30} -> {getattr(e, 'code', type(e).__name__)}")
+                continue
+            prods = extraer_productos_html(txt, t)
+            tipos = re.findall(r'<script[^>]*type="([^"]*json[^"]*)"', txt, re.I)
+            print(f"  {pat.split('}', 1)[1][:28]:30} -> ok {len(txt)}b | json: {len(prods)} prod | "
+                  f"scripts: {sorted(set(tipos))} | '$': {txt.count('$')} | termino: {txt.lower().count(termino)}")
+            if prods:
+                print(f"     ej: {prods[0]['titulo'][:50]} {pesos(prods[0]['precio'])} {prods[0]['url'][:70]}")
+            else:
+                m = re.search(r"\$\s?\d{2,3}[.,]\d{3}", txt)
+                if m:
+                    frag = re.sub(r"\s+", " ", txt[max(0, m.start() - 700):m.end() + 150])
+                    print("     html: " + frag)
+            time.sleep(PAUSA)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("comando", nargs="?", default="correr", choices=["correr", "diagnostico"])
+    ap.add_argument("comando", nargs="?", default="correr", choices=["correr", "diagnostico", "sonda"])
+    ap.add_argument("--urls", default=os.environ.get("SONDA_URLS", ""))
     ap.add_argument("--config", default="tiendas.json")
     ap.add_argument("--db", default="data/precios.db")
     a = ap.parse_args()
     with open(a.config, encoding="utf-8") as f:
         cfg = json.load(f)
+    if a.comando == "sonda":
+        return sonda(a.urls.split())
     if a.comando == "diagnostico":
         diagnostico(cfg, "data/diagnostico.md")
     else:
