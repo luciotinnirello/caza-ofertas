@@ -5,8 +5,11 @@ Recorre tiendas online cada 30 minutos, guarda el historial de precios y avisa p
 - **POSIBLE BUG**: el precio cae 45% o más contra su precio habitual.
 - **DESCUENTO EXTREMO**: 70% o más contra el precio de lista publicado.
 - **MAS BARATO QUE OTRAS TIENDAS**: 30% menos que la mediana del mismo modelo en otras tiendas.
+- **NUEVO FUERA DE RANGO**: producto sin historial, muy por debajo del rango de su categoría real en la tienda (avisa si con un dígito más sería un precio normal).
 - **MINIMO HISTORICO**: 10% por debajo del mínimo anterior (oferta real).
 - **DESCUENTO INFLADO**: anuncia un descuento sobre un "antes" que nunca cobró.
+
+Cada alerta trae un link para comparar el producto en Mercado Libre.
 
 ## Puesta en marcha
 

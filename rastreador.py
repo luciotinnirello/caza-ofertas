@@ -134,7 +134,8 @@ def es_accesorio(titulo, excluir):
 
 # ------------------------------------------------------------------ lectores
 
-def _producto(tienda, sku, titulo, precio, lista=None, url="", marca="", ean="", vendedor=""):
+def _producto(tienda, sku, titulo, precio, lista=None, url="", marca="", ean="", vendedor="",
+              cat_real="", propio=None):
     div = float(tienda.get("divisor", 1) or 1)
     precio = precio / div if precio else None
     lista = lista / div if lista else None
@@ -142,7 +143,8 @@ def _producto(tienda, sku, titulo, precio, lista=None, url="", marca="", ean="",
         lista = None  # sin descuento, o precio de lista imposible (dato basura de la tienda)
     return {"tienda": tienda["nombre"], "sku": str(sku), "titulo": (titulo or "").strip(),
             "precio": precio, "lista": lista, "url": url, "marca": (marca or "").strip(),
-            "ean": str(ean or ""), "vendedor": vendedor or ""}
+            "ean": str(ean or ""), "vendedor": vendedor or "",
+            "cat_real": cat_real or "", "propio": propio}
 
 
 def interpretar_vtex(tienda, datos):
@@ -161,14 +163,16 @@ def interpretar_vtex(tienda, datos):
                 if not precio or (of.get("AvailableQuantity") or 0) <= 0:
                     continue
                 if mejor is None or precio < mejor[0]:
-                    mejor = (precio, numero(of.get("ListPrice")), s.get("sellerName", ""))
+                    mejor = (precio, numero(of.get("ListPrice")), s.get("sellerName", ""),
+                             str(s.get("sellerId", "")) == "1")
             if not mejor:
                 continue
             salida.append(_producto(
                 tienda, item.get("itemId") or prod.get("productId"),
                 item.get("nameComplete") or prod.get("productName"),
                 mejor[0], mejor[1], prod.get("link", ""), prod.get("brand", ""),
-                item.get("ean", ""), mejor[2]))
+                item.get("ean", ""), mejor[2],
+                ((prod.get("categories") or [""])[0] or "").strip("/"), mejor[3]))
     return salida
 
 
@@ -326,6 +330,11 @@ def abrir(ruta):
             tienda TEXT, sku TEXT, tipo TEXT, precio REAL, fecha TEXT,
             PRIMARY KEY(tienda, sku, tipo, precio));
     """)
+    columnas = {r[1] for r in c.execute("PRAGMA table_info(productos)")}
+    if "cat_real" not in columnas:
+        c.execute("ALTER TABLE productos ADD COLUMN cat_real TEXT DEFAULT ''")
+        c.execute("ALTER TABLE productos ADD COLUMN propio INTEGER")
+    c.execute("CREATE INDEX IF NOT EXISTS i_cat ON productos(tienda, cat_real)")
     return c
 
 
@@ -370,9 +379,11 @@ def guardar(c, p, categoria, ahora, dias_hist):
     fila = c.execute("SELECT ultimo_precio, ultima_lista FROM productos WHERE tienda=? AND sku=?",
                      (t, sku)).fetchone()
     if fila is None:
-        c.execute("INSERT INTO productos VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        c.execute("INSERT INTO productos(tienda, sku, titulo, marca, clave, url, categoria, vendedor,"
+                  " primera_vez, ultima_vez, ultimo_precio, ultima_lista, cat_real, propio)"
+                  " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (t, sku, p["titulo"], p["marca"], clave, p["url"], categoria, p["vendedor"],
-                   iso, iso, p["precio"], p["lista"]))
+                   iso, iso, p["precio"], p["lista"], p["cat_real"], p["propio"]))
         c.execute("INSERT INTO precios VALUES(?,?,?,?,?)", (t, sku, iso, p["precio"], p["lista"]))
         return []
     hist = None
@@ -381,8 +392,9 @@ def guardar(c, p, categoria, ahora, dias_hist):
         hist = historial(c, t, sku, ahora, dias_hist)
         c.execute("INSERT INTO precios VALUES(?,?,?,?,?)", (t, sku, iso, p["precio"], p["lista"]))
     c.execute("""UPDATE productos SET titulo=?, url=?, clave=?, vendedor=?, ultima_vez=?,
-                 ultimo_precio=?, ultima_lista=? WHERE tienda=? AND sku=?""",
-              (p["titulo"], p["url"], clave, p["vendedor"], iso, p["precio"], p["lista"], t, sku))
+                 ultimo_precio=?, ultima_lista=?, cat_real=?, propio=? WHERE tienda=? AND sku=?""",
+              (p["titulo"], p["url"], clave, p["vendedor"], iso, p["precio"], p["lista"],
+               p["cat_real"], p["propio"], t, sku))
     return hist
 
 
@@ -393,6 +405,20 @@ def precios_otras_tiendas(c, clave, tienda, ahora, dias=3):
     return [r[0] for r in c.execute(
         "SELECT MIN(ultimo_precio) FROM productos WHERE clave=? AND tienda!=? AND ultima_vez>=? "
         "GROUP BY tienda", (clave, tienda, desde)) if r[0]]
+
+
+def precios_vecinos(c, p, ahora, reglas, dias=7):
+    """Precios de productos de la misma categoria real de la tienda (misma marca si alcanza)."""
+    if not p.get("cat_real"):
+        return []
+    desde = (ahora - timedelta(days=dias)).isoformat()
+    filas = c.execute("SELECT ultimo_precio, marca FROM productos WHERE tienda=? AND cat_real=? "
+                      "AND sku!=? AND ultima_vez>=?", (p["tienda"], p["cat_real"], p["sku"], desde)).fetchall()
+    marca = [x for x, m in filas if x and m and m.lower() == p["marca"].lower()]
+    if p["marca"] and len(marca) >= reglas["min_vecinos_marca"]:
+        return marca
+    todos = [x for x, _ in filas if x]
+    return todos if len(todos) >= reglas["min_vecinos"] else []
 
 
 # ----------------------------------------------------------------- deteccion
@@ -408,11 +434,19 @@ REGLAS = {
     "inflado_margen": 0.15,     # ...pero el "antes" supera en 15% al maximo que realmente cobro
     "otras_tiendas": 0.30,      # 30% mas barato que la mediana de otras tiendas
     "min_otras_tiendas": 2,
+    "min_vecinos": 15,            # productos necesarios en la categoria para comparar
+    "min_vecinos_marca": 8,       # si hay tantos de la misma marca, se compara solo contra ellos
+    "vecinos_factor": 0.40,       # nuevo a menos del 40% del precio barato habitual de su categoria
+    "vecinos_factor_terceros": 0.25,  # mas exigente si vende un tercero del marketplace
     "max_alertas_por_corrida": 15,
 }
 
 
-def evaluar(precio, lista, hist, otras, reglas=None, piso=None):
+def _percentil(ordenados, q):
+    return ordenados[int(q * (len(ordenados) - 1))]
+
+
+def evaluar(precio, lista, hist, otras, reglas=None, piso=None, vecinos=None, propio=None):
     """Devuelve una lista de (tipo, detalle), de mas a menos grave.
 
     hist: [(precio, lista, dias)] previo a esta observacion. otras: precios en otras tiendas.
@@ -434,6 +468,15 @@ def evaluar(precio, lista, hist, otras, reglas=None, piso=None):
         if precio <= m_otras * (1 - r["otras_tiendas"]):
             al.append(("MAS BARATO QUE OTRAS TIENDAS",
                        f"{round((1 - precio / m_otras) * 100)}% menos que la mediana de {len(otras)} tiendas ({pesos(m_otras)})"))
+    if vecinos and dias < r["min_dias_caida"]:
+        v = sorted(vecinos)
+        barato = _percentil(v, 0.10)
+        factor = r["vecinos_factor_terceros"] if propio is False else r["vecinos_factor"]
+        if precio < barato * factor:
+            det = f"sin historial y muy por debajo de su categoria: lo barato habitual ronda {pesos(barato)} ({len(v)} productos)"
+            if barato <= precio * 10 <= _percentil(v, 0.90):
+                det += f"; con un digito mas ({pesos(precio * 10)}) seria un precio normal"
+            al.append(("NUEVO FUERA DE RANGO", det))
     if hist and dias >= r["min_dias_minimo"]:
         minimo = min(p for p, _, _ in hist)
         maximo = max(p for p, _, _ in hist)
@@ -530,7 +573,9 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
                        and any(w.lower() in inicio for w in b.get("debe_contener", [b["termino"]])))
         clave = clave_modelo(p["titulo"], p["marca"], p["ean"])
         otras = [] if accesorio else precios_otras_tiendas(c, clave, p["tienda"], ahora)
-        al = evaluar(p["precio"], p["lista"], hist, otras, reglas, b["piso"] if aplica_piso else None)
+        vecinos = [] if accesorio else precios_vecinos(c, p, ahora, reglas)
+        al = evaluar(p["precio"], p["lista"], hist, otras, reglas, b["piso"] if aplica_piso else None,
+                     vecinos, p["propio"])
         nuevas = []
         for tipo, det in al:
             try:
@@ -544,6 +589,7 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     c.commit()
 
     orden = ["POSIBLE BUG", "PRECIO ABSURDO", "DESCUENTO EXTREMO", "MAS BARATO QUE OTRAS TIENDAS",
+             "NUEVO FUERA DE RANGO",
              "MINIMO HISTORICO", "DESCUENTO INFLADO"]
     pendientes.sort(key=lambda x: orden.index(x[1][0][0]))
     tope = reglas["max_alertas_por_corrida"]

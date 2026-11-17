@@ -106,6 +106,18 @@ class Deteccion(unittest.TestCase):
         self.assertEqual(self.tipos(300000, None, [], [500000, 520000]), ["MAS BARATO QUE OTRAS TIENDAS"])
         self.assertEqual(self.tipos(300000, None, [], [500000]), [])
 
+    def test_nuevo_fuera_de_rango(self):
+        v = [300000 + i * 20000 for i in range(20)]
+        al = r.evaluar(35000, None, [], [], vecinos=v, propio=True)
+        self.assertEqual([t for t, _ in al], ["NUEVO FUERA DE RANGO"])
+        self.assertIn("digito", al[0][1])
+        self.assertEqual(self.tipos(250000, None, [], [], vecinos=v, propio=True), [])
+        # vendedor externo: mas exigente
+        self.assertEqual(self.tipos(100000, None, [], [], vecinos=v, propio=False), [])
+        self.assertEqual(self.tipos(100000, None, [], [], vecinos=v, propio=True), ["NUEVO FUERA DE RANGO"])
+        # con historial propio manda el historial
+        self.assertEqual(self.tipos(35000, None, [(36000, None, 30)], [], vecinos=v), [])
+
     def test_piso(self):
         self.assertEqual(self.tipos(9999, None, [], [], piso=90000), ["PRECIO ABSURDO"])
 
