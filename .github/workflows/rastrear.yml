@@ -72,12 +72,13 @@ jobs:
           git commit --quiet -m "datos $(date -u +%FT%TZ)" || exit 0
           git push --quiet --force "$REPO_URL" datos
 
-      - name: Encadenar la proxima corrida (respaldo mientras el horario de GitHub no arranca)
-        if: github.event.inputs.cadena == 'si'
+      - name: Encadenar la proxima corrida (el horario de GitHub es irregular)
+        if: (github.event.inputs.modo || 'correr') == 'correr' && github.event.inputs.solo == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          n=$(gh api "repos/${{ github.repository }}/actions/runs?event=schedule" --jq '.total_count')
-          if [ "$n" -gt 0 ]; then echo "El horario ya funciona; se corta la cadena."; exit 0; fi
           sleep 1200
+          otras=$(gh api "repos/${{ github.repository }}/actions/runs?per_page=20" \
+            --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }}) | select(.status=="queued" or .status=="pending" or .status=="in_progress" or .status=="waiting")] | length')
+          if [ "$otras" -gt 0 ]; then echo "Ya hay otra corrida en marcha; no se encadena."; exit 0; fi
           gh workflow run rastrear.yml --repo "${{ github.repository }}" --ref main -f modo=correr -f cadena=si
