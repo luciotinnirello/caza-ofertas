@@ -549,7 +549,7 @@ _MARCAS_PLATAFORMA = [
     ("VTEX", ("vtexassets", "vteximg", "vtex.com", "__runtime__")),
     ("Tiendanube", ("tiendanube", "mitiendanube", "d26lpennugtm8s")),
     ("Shopify", ("cdn.shopify.com",)),
-    ("Magento", ("mage/", "magento", "static/version")),
+    ("Magento", ("magento", "/static/version", "mage-cache")),
     ("WooCommerce", ("woocommerce", "wp-content")),
     ("Next.js", ("__next_data__", "/_next/")),
 ]

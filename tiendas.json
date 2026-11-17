@@ -2,50 +2,240 @@
   "max_paginas": 4,
   "reglas": {},
   "excluir_titulos": [
-    "funda", "soporte", "control remoto", "cable", "vidrio", "protector", "repuesto",
-    "compatible", "adaptador", "cargador", "mueble", "rack", "filtro", "antena"
+    "funda",
+    "soporte",
+    "control remoto",
+    "cable",
+    "vidrio",
+    "protector",
+    "repuesto",
+    "compatible",
+    "adaptador",
+    "cargador",
+    "mueble",
+    "rack",
+    "filtro",
+    "antena"
   ],
   "busquedas": [
-    {"termino": "smart tv", "categoria": "TV", "piso": 90000, "debe_contener": ["tv", "televisor"]},
-    {"termino": "notebook", "categoria": "Notebooks", "piso": 250000, "debe_contener": ["notebook", "laptop"]},
-    {"termino": "celular", "categoria": "Celulares", "piso": 50000, "debe_contener": ["celular", "smartphone"]},
-    {"termino": "monitor", "categoria": "Monitores", "piso": 60000, "debe_contener": ["monitor"]},
-    {"termino": "heladera", "categoria": "Heladeras", "piso": 200000, "debe_contener": ["heladera"]},
-    {"termino": "lavarropas", "categoria": "Lavarropas", "piso": 180000, "debe_contener": ["lavarropas"]},
-    {"termino": "aire acondicionado", "categoria": "Aires", "piso": 250000, "debe_contener": ["aire acondicionado", "split"]}
+    {
+      "termino": "smart tv",
+      "categoria": "TV",
+      "piso": 90000,
+      "debe_contener": [
+        "tv",
+        "televisor"
+      ]
+    },
+    {
+      "termino": "notebook",
+      "categoria": "Notebooks",
+      "piso": 250000,
+      "debe_contener": [
+        "notebook",
+        "laptop"
+      ]
+    },
+    {
+      "termino": "celular",
+      "categoria": "Celulares",
+      "piso": 50000,
+      "debe_contener": [
+        "celular",
+        "smartphone"
+      ]
+    },
+    {
+      "termino": "monitor",
+      "categoria": "Monitores",
+      "piso": 60000,
+      "debe_contener": [
+        "monitor"
+      ]
+    },
+    {
+      "termino": "heladera",
+      "categoria": "Heladeras",
+      "piso": 200000,
+      "debe_contener": [
+        "heladera"
+      ]
+    },
+    {
+      "termino": "lavarropas",
+      "categoria": "Lavarropas",
+      "piso": 180000,
+      "debe_contener": [
+        "lavarropas"
+      ]
+    },
+    {
+      "termino": "aire acondicionado",
+      "categoria": "Aires",
+      "piso": 250000,
+      "debe_contener": [
+        "aire acondicionado",
+        "split"
+      ]
+    }
   ],
   "tiendas": [
-    {"nombre": "Fravega", "url": "https://www.fravega.com", "lector": "html",
-     "busqueda": "https://www.fravega.com/l/?keyword={q}&page={p}", "prefijo_producto": "/p/"},
-    {"nombre": "OnCity", "url": "https://www.oncity.com", "lector": "auto"},
-    {"nombre": "Naldo", "url": "https://www.naldo.com.ar", "lector": "auto"},
-    {"nombre": "Cetrogar", "url": "https://www.cetrogar.com.ar", "lector": "auto",
-     "busqueda": "https://www.cetrogar.com.ar/catalogsearch/result/?q={q}&p={p}"},
-    {"nombre": "Musimundo", "url": "https://www.musimundo.com", "lector": "auto",
-     "busqueda": "https://www.musimundo.com/search?text={q}&page={p}"}
+    {
+      "nombre": "OnCity",
+      "url": "https://www.oncity.com",
+      "lector": "vtex"
+    },
+    {
+      "nombre": "Naldo",
+      "url": "https://www.naldo.com.ar",
+      "lector": "vtex"
+    },
+    {
+      "nombre": "Cetrogar",
+      "url": "https://www.cetrogar.com.ar",
+      "lector": "vtex"
+    },
+    {
+      "nombre": "Pardo",
+      "url": "https://www.pardo.com.ar",
+      "lector": "vtex"
+    },
+    {
+      "nombre": "Bringeri",
+      "url": "https://www.bringeri.com.ar",
+      "lector": "vtex"
+    },
+    {
+      "nombre": "Carrefour",
+      "url": "https://www.carrefour.com.ar",
+      "lector": "vtex"
+    },
+    {
+      "nombre": "Jumbo",
+      "url": "https://www.jumbo.com.ar",
+      "lector": "vtex"
+    },
+    {
+      "nombre": "Fravega",
+      "url": "https://www.fravega.com",
+      "lector": "html",
+      "busqueda": "https://www.fravega.com/l/?keyword={q}&page={p}",
+      "prefijo_producto": "/p/",
+      "activa": false,
+      "nota": "Bloquea los servidores de GitHub (403)"
+    },
+    {
+      "nombre": "Musimundo",
+      "url": "https://www.musimundo.com",
+      "lector": "html",
+      "busqueda": "https://www.musimundo.com/search?text={q}&page={p}",
+      "activa": false,
+      "nota": "Falta lector propio"
+    }
   ],
   "candidatas": [
-    {"nombre": "Megatone", "url": "https://www.megatone.net", "rubro": "electro"},
-    {"nombre": "Pardo", "url": "https://www.pardo.com.ar", "rubro": "electro"},
-    {"nombre": "Bringeri", "url": "https://www.bringeri.com.ar", "rubro": "electro"},
-    {"nombre": "Casa del Audio", "url": "https://www.casadelaudio.com", "rubro": "electro"},
-    {"nombre": "Tienda Newsan", "url": "https://www.tiendanewsan.com.ar", "rubro": "electro"},
-    {"nombre": "Carrefour", "url": "https://www.carrefour.com.ar", "rubro": "electro"},
-    {"nombre": "Jumbo", "url": "https://www.jumbo.com.ar", "rubro": "electro"},
-    {"nombre": "Coto Digital", "url": "https://www.cotodigital.com.ar", "rubro": "electro"},
-    {"nombre": "Easy", "url": "https://www.easy.com.ar", "rubro": "electro"},
-    {"nombre": "Compra Gamer", "url": "https://compragamer.com", "rubro": "computacion", "prueba": "monitor"},
-    {"nombre": "Full H4rd", "url": "https://www.fullh4rd.com.ar", "rubro": "computacion", "prueba": "monitor"},
-    {"nombre": "Maximus", "url": "https://www.maximus.com.ar", "rubro": "computacion", "prueba": "monitor"},
-    {"nombre": "Mexx", "url": "https://www.mexx.com.ar", "rubro": "computacion", "prueba": "monitor"},
-    {"nombre": "Venex", "url": "https://www.venex.com.ar", "rubro": "computacion", "prueba": "monitor"},
-    {"nombre": "Nexon (Rosario)", "url": "https://www.nexon.com.ar", "rubro": "computacion", "prueba": "monitor"},
-    {"nombre": "Sporting (Rosario)", "url": "https://www.sporting.com.ar", "rubro": "indumentaria", "prueba": "zapatillas"},
-    {"nombre": "Dexter", "url": "https://www.dexter.com.ar", "rubro": "indumentaria", "prueba": "zapatillas"},
-    {"nombre": "Moov", "url": "https://www.moov.com.ar", "rubro": "indumentaria", "prueba": "zapatillas"},
-    {"nombre": "Stock Center", "url": "https://www.stockcenter.com.ar", "rubro": "indumentaria", "prueba": "zapatillas"},
-    {"nombre": "Solo Deportes", "url": "https://www.solodeportes.com.ar", "rubro": "indumentaria", "prueba": "zapatillas"},
-    {"nombre": "Netshoes", "url": "https://www.netshoes.com.ar", "rubro": "indumentaria", "prueba": "zapatillas"},
-    {"nombre": "Dafiti", "url": "https://www.dafiti.com.ar", "rubro": "indumentaria", "prueba": "zapatillas"}
+    {
+      "nombre": "Megatone",
+      "url": "https://www.megatone.net",
+      "rubro": "electro"
+    },
+    {
+      "nombre": "Casa del Audio",
+      "url": "https://www.casadelaudio.com",
+      "rubro": "electro"
+    },
+    {
+      "nombre": "Tienda Newsan",
+      "url": "https://www.tiendanewsan.com.ar",
+      "rubro": "electro"
+    },
+    {
+      "nombre": "Coto Digital",
+      "url": "https://www.cotodigital.com.ar",
+      "rubro": "electro"
+    },
+    {
+      "nombre": "Easy",
+      "url": "https://www.easy.com.ar",
+      "rubro": "electro"
+    },
+    {
+      "nombre": "Compra Gamer",
+      "url": "https://compragamer.com",
+      "rubro": "computacion",
+      "prueba": "monitor"
+    },
+    {
+      "nombre": "Full H4rd",
+      "url": "https://www.fullh4rd.com.ar",
+      "rubro": "computacion",
+      "prueba": "monitor"
+    },
+    {
+      "nombre": "Maximus",
+      "url": "https://www.maximus.com.ar",
+      "rubro": "computacion",
+      "prueba": "monitor"
+    },
+    {
+      "nombre": "Mexx",
+      "url": "https://www.mexx.com.ar",
+      "rubro": "computacion",
+      "prueba": "monitor"
+    },
+    {
+      "nombre": "Venex",
+      "url": "https://www.venex.com.ar",
+      "rubro": "computacion",
+      "prueba": "monitor"
+    },
+    {
+      "nombre": "Nexon (Rosario)",
+      "url": "https://www.nexon.com.ar",
+      "rubro": "computacion",
+      "prueba": "monitor"
+    },
+    {
+      "nombre": "Sporting (Rosario)",
+      "url": "https://www.sporting.com.ar",
+      "rubro": "indumentaria",
+      "prueba": "zapatillas"
+    },
+    {
+      "nombre": "Dexter",
+      "url": "https://www.dexter.com.ar",
+      "rubro": "indumentaria",
+      "prueba": "zapatillas"
+    },
+    {
+      "nombre": "Moov",
+      "url": "https://www.moov.com.ar",
+      "rubro": "indumentaria",
+      "prueba": "zapatillas"
+    },
+    {
+      "nombre": "Stock Center",
+      "url": "https://www.stockcenter.com.ar",
+      "rubro": "indumentaria",
+      "prueba": "zapatillas"
+    },
+    {
+      "nombre": "Solo Deportes",
+      "url": "https://www.solodeportes.com.ar",
+      "rubro": "indumentaria",
+      "prueba": "zapatillas"
+    },
+    {
+      "nombre": "Netshoes",
+      "url": "https://www.netshoes.com.ar",
+      "rubro": "indumentaria",
+      "prueba": "zapatillas"
+    },
+    {
+      "nombre": "Dafiti",
+      "url": "https://www.dafiti.com.ar",
+      "rubro": "indumentaria",
+      "prueba": "zapatillas"
+    }
   ]
 }
