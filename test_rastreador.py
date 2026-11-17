@@ -113,6 +113,58 @@ class Lectores(unittest.TestCase):
         self.assertEqual((p[0]["precio"], p[0]["lista"], p[0]["ean"]), (579999, 724999, "7799219155399"))
         self.assertEqual(p[0]["url"], "https://www.gadnic.com.ar/aires-acondicionados/aire-portatil")
 
+    def test_barrido_y_estreno(self):
+        cfg = {"tiendas": [{"nombre": "A", "url": "https://a.test"}, {"nombre": "B", "url": "https://b.test"},
+                           {"nombre": "C", "url": "https://c.test"}],
+               "busquedas": [{"termino": "notebook"}]}
+        activas = {"A", "B"}
+        precios = {"A": 1749999, "B": 1549999, "C": 1199000}
+
+        def lector(tienda, termino, mp):
+            return [r._producto(tienda, "1", "Notebook HP 15-FC0235LA", precios[tienda["nombre"]], None,
+                                "", "HP")], "prueba"
+
+        cfg2 = dict(cfg, tiendas=[t for t in cfg["tiendas"] if t["nombre"] in activas])
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "p.db")
+            t0 = datetime(2026, 11, 1, tzinfo=timezone.utc)
+            al, _ = r.correr(cfg2, db, t0, lector)
+            self.assertEqual(al, [])
+            # C entra por primera vez ya barata: avisa por cruce aunque sea primera carga
+            al, _ = r.correr(cfg, db, t0 + timedelta(hours=1), lector)
+            self.assertEqual([(p["tienda"], a[0][0]) for p, a in al], [("C", "MAS BARATO QUE OTRAS TIENDAS")])
+            # no repite en la corrida siguiente ni en el barrido del dia siguiente (mismo precio)
+            al, _ = r.correr(cfg, db, t0 + timedelta(hours=2), lector)
+            self.assertEqual(al, [])
+            al, _ = r.correr(cfg, db, t0 + timedelta(days=1, hours=1), lector)
+            self.assertEqual(al, [])
+            # B baja sin cambiar C... y A ya estaba barata desde antes: el barrido la encuentra
+            precios["C"] = 1700000
+            precios["A"] = 1100000
+            al, _ = r.correr(cfg, db, t0 + timedelta(days=1, hours=2), lector)
+            self.assertEqual([p["tienda"] for p, _ in al], ["A"])
+
+    def test_excedente_se_envia_despues(self):
+        cfg = {"tiendas": [{"nombre": "A", "url": "https://a.test"}], "busquedas": [{"termino": "x"}],
+               "reglas": {"max_alertas_por_corrida": 2}}
+        precios = {i: 100000 for i in range(5)}
+
+        def lector(tienda, termino, mp):
+            return [r._producto(tienda, str(i), f"Producto MOD{i}X{i}", precios[i], None) for i in precios], "p"
+
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "p.db")
+            t0 = datetime(2026, 11, 1, tzinfo=timezone.utc)
+            for dia in range(10):
+                r.correr(cfg, db, t0 + timedelta(days=dia), lector)
+            for i in precios:
+                precios[i] = 30000
+            enviados = []
+            for h in range(1, 5):
+                al, _ = r.correr(cfg, db, t0 + timedelta(days=10, hours=h), lector)
+                enviados += [p["sku"] for p, _ in al[:2]]
+            self.assertEqual(sorted(enviados), ["0", "1", "2", "3", "4"])
+
     def test_cada_horas(self):
         cfg = {"tiendas": [{"nombre": "A", "url": "https://a.test", "cada_horas": 3}],
                "busquedas": [{"termino": "x"}]}
@@ -165,6 +217,11 @@ class Deteccion(unittest.TestCase):
     def test_otras_tiendas(self):
         self.assertEqual(self.tipos(300000, None, [], [500000, 520000]), ["MAS BARATO QUE OTRAS TIENDAS"])
         self.assertEqual(self.tipos(300000, None, [], [500000]), [])
+        # una tienda carisima no alcanza: tiene que ser bastante mas barato que la mas barata
+        self.assertEqual(self.tipos(950000, None, [], [("A", 999999), ("B", 2399999), ("C", 2399999)]), [])
+        al = r.evaluar(1249000, None, [], [("OnCity", 1749999), ("Naldo", 1549999), ("Cetrogar", 1899999)])
+        self.assertEqual([x for x, _ in al], ["MAS BARATO QUE OTRAS TIENDAS"])
+        self.assertIn("Naldo $1.549.999", al[0][1])
 
     def test_nuevo_fuera_de_rango(self):
         v = [300000 + i * 20000 for i in range(20)]

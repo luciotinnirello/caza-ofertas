@@ -490,6 +490,8 @@ def abrir(ruta):
         CREATE INDEX IF NOT EXISTS i_precios ON precios(tienda, sku, fecha);
         CREATE INDEX IF NOT EXISTS i_clave ON productos(clave);
         CREATE TABLE IF NOT EXISTS meta(clave TEXT PRIMARY KEY, valor TEXT);
+        CREATE TABLE IF NOT EXISTS cola(tienda TEXT, sku TEXT, precio REAL, datos TEXT,
+            PRIMARY KEY(tienda, sku));
         CREATE TABLE IF NOT EXISTS alertas(
             tienda TEXT, sku TEXT, tipo TEXT, precio REAL, fecha TEXT,
             PRIMARY KEY(tienda, sku, tipo, precio));
@@ -499,6 +501,11 @@ def abrir(ruta):
         c.execute("ALTER TABLE productos ADD COLUMN cat_real TEXT DEFAULT ''")
         c.execute("ALTER TABLE productos ADD COLUMN propio INTEGER")
     c.execute("CREATE INDEX IF NOT EXISTS i_cat ON productos(tienda, cat_real)")
+    if not c.execute("SELECT 1 FROM meta WHERE clave='limpieza1'").fetchone():
+        # la primera corrida registro como enviadas ~340 alertas que nunca salieron por el tope
+        c.execute("DELETE FROM alertas WHERE fecha < '2026-11-17T05:10'")
+        c.execute("INSERT INTO meta VALUES('limpieza1', '1')")
+        c.commit()
     return c
 
 
@@ -584,9 +591,9 @@ def precios_otras_tiendas(c, clave, tienda, ahora, dias=3):
     if not clave:
         return []
     desde = (ahora - timedelta(days=dias)).isoformat()
-    return [r[0] for r in c.execute(
-        "SELECT MIN(ultimo_precio) FROM productos WHERE clave=? AND tienda!=? AND ultima_vez>=? "
-        "GROUP BY tienda", (clave, tienda, desde)) if r[0]]
+    return [(r[0], r[1]) for r in c.execute(
+        "SELECT tienda, MIN(ultimo_precio) FROM productos WHERE clave=? AND tienda!=? AND ultima_vez>=? "
+        "GROUP BY tienda", (clave, tienda, desde)) if r[1]]
 
 
 def precios_vecinos(c, p, ahora, reglas, dias=7):
@@ -614,12 +621,14 @@ REGLAS = {
     "min_dias_minimo": 7,
     "inflado_descuento": 0.20,  # dice 20% off o mas...
     "inflado_margen": 0.15,     # ...pero el "antes" supera en 15% al maximo que realmente cobro
-    "otras_tiendas": 0.30,      # 30% mas barato que la mediana de otras tiendas
+    "otras_tiendas": 0.25,      # 25% mas barato que la mediana de otras tiendas...
+    "otras_tiendas_min": 0.15,  # ...y 15% mas barato que la mas barata de ellas
     "min_otras_tiendas": 2,
     "min_vecinos": 15,            # productos necesarios en la categoria para comparar
     "min_vecinos_marca": 8,       # si hay tantos de la misma marca, se compara solo contra ellos
     "vecinos_factor": 0.40,       # nuevo a menos del 40% del precio barato habitual de su categoria
     "vecinos_factor_terceros": 0.25,  # mas exigente si vende un tercero del marketplace
+    "horas_barrido": 24,          # cada cuanto se compara todo el catalogo contra otras tiendas
     "max_alertas_por_corrida": 15,
 }
 
@@ -645,11 +654,15 @@ def evaluar(precio, lista, hist, otras, reglas=None, piso=None, vecinos=None, pr
         al.append(("POSIBLE BUG", f"cayo {round((1 - precio / med) * 100)}% contra su precio habitual ({pesos(med)})"))
     if lista and precio <= lista * (1 - r["descuento_extremo"]):
         al.append(("DESCUENTO EXTREMO", f"{round((1 - precio / lista) * 100)}% contra el precio de lista ({pesos(lista)})"))
+    otras = [o if isinstance(o, tuple) else ("otra tienda", o) for o in otras or []]
     if len(otras) >= r["min_otras_tiendas"]:
-        m_otras = statistics.median(otras)
-        if precio <= m_otras * (1 - r["otras_tiendas"]):
+        m_otras = statistics.median(p for _, p in otras)
+        t_min, p_min = min(otras, key=lambda o: o[1])
+        if precio <= m_otras * (1 - r["otras_tiendas"]) and precio <= p_min * (1 - r["otras_tiendas_min"]):
+            lista_otras = ", ".join(f"{t} {pesos(p)}" for t, p in sorted(otras, key=lambda o: o[1])[:4])
             al.append(("MAS BARATO QUE OTRAS TIENDAS",
-                       f"{round((1 - precio / m_otras) * 100)}% menos que la mediana de {len(otras)} tiendas ({pesos(m_otras)})"))
+                       f"{round((1 - precio / m_otras) * 100)}% menos que la mediana de {len(otras)} tiendas "
+                       f"y {round((1 - precio / p_min) * 100)}% menos que la mas barata ({lista_otras})"))
     if vecinos and dias < r["min_dias_caida"]:
         v = sorted(vecinos)
         barato = _percentil(v, 0.10)
@@ -715,6 +728,11 @@ def armar_mensaje(p, alertas):
 
 # ------------------------------------------------------------------ comandos
 
+def ya_avisada(c, p, tipo):
+    return c.execute("SELECT 1 FROM alertas WHERE tienda=? AND sku=? AND tipo=? AND precio=?",
+                     (p["tienda"], p["sku"], tipo, p["precio"])).fetchone() is not None
+
+
 def correr(cfg, ruta_db, ahora=None, lector=leer):
     ahora = ahora or datetime.now(timezone.utc)
     solo = os.environ.get("SOLO_TIENDA", "").strip().lower()
@@ -724,7 +742,7 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     reglas.update(cfg.get("reglas") or {})
     excluir = cfg.get("excluir_titulos") or []
     c = abrir(ruta_db)
-    cambiados, vistos, resumen = [], set(), []
+    cambiados, vistos, resumen, solo_cruce = [], set(), [], []
     for tienda in cfg["tiendas"]:
         if not tienda.get("activa", True):
             continue
@@ -752,14 +770,16 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
                 vistos.add((p["tienda"], p["sku"]))
                 total += 1
                 hist = guardar(c, p, b.get("categoria", ""), ahora, reglas["dias_historial"])
-                if hist is not None and not estreno:
+                if estreno:
+                    solo_cruce.append(p)
+                elif hist is not None:
                     cambiados.append((p, hist, b))
             time.sleep(PAUSA if lector is leer else 0)
         if total:
             c.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", ("ultima:" + tienda["nombre"], ahora.isoformat()))
         c.commit()
         resumen.append(f"{tienda['nombre']}: {total} productos" + (f", {errores} errores" if errores else "")
-                       + (" (primera carga, sin alertas)" if estreno else ""))
+                       + (" (primera carga: solo se compara contra otras tiendas)" if estreno else ""))
         print(resumen[-1])
 
     pendientes = []
@@ -774,15 +794,33 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
         vecinos = [] if accesorio else precios_vecinos(c, p, ahora, reglas)
         al = evaluar(p["precio"], p["lista"], hist, otras, reglas, b["piso"] if aplica_piso else None,
                      vecinos, p["propio"])
-        nuevas = []
-        for tipo, det in al:
-            try:
-                c.execute("INSERT INTO alertas VALUES(?,?,?,?,?)",
-                          (p["tienda"], p["sku"], tipo, p["precio"], ahora.isoformat()))
-                nuevas.append((tipo, det))
-            except sqlite3.IntegrityError:
-                pass  # ya se aviso por este precio
+        nuevas = [(tipo, det) for tipo, det in al if not ya_avisada(c, p, tipo)]
         if nuevas:
+            pendientes.append((p, nuevas))
+    # barrido diario: compara contra otras tiendas aunque el precio no haya cambiado
+    ult = c.execute("SELECT valor FROM meta WHERE clave='barrido'").fetchone()
+    barrido = not ult or (ahora - _fecha(ult[0])).total_seconds() >= reglas["horas_barrido"] * 3600
+    if barrido:
+        desde = (ahora - timedelta(days=1)).isoformat()
+        cols = ("tienda", "sku", "titulo", "marca", "url", "vendedor", "ultimo_precio", "ultima_lista", "propio")
+        for fila in c.execute(f"SELECT {', '.join(cols)} FROM productos WHERE clave!='' AND ultima_vez>=?",
+                              (desde,)).fetchall():
+            d = dict(zip(cols, fila))
+            solo_cruce.append({"tienda": d["tienda"], "sku": d["sku"], "titulo": d["titulo"], "marca": d["marca"],
+                               "url": d["url"], "vendedor": d["vendedor"], "precio": d["ultimo_precio"],
+                               "lista": d["ultima_lista"], "ean": "", "propio": d["propio"], "cat_real": ""})
+        print(f"Barrido diario contra otras tiendas: {len(solo_cruce)} productos")
+    ya = {(p["tienda"], p["sku"]) for p, _ in pendientes}
+    for p in solo_cruce:
+        if (p["tienda"], p["sku"]) in ya or es_accesorio(p["titulo"], excluir):
+            continue
+        clave = (c.execute("SELECT clave FROM productos WHERE tienda=? AND sku=?", (p["tienda"], p["sku"])).fetchone()
+                 or [""])[0]
+        al = [a for a in evaluar(p["precio"], None, [], precios_otras_tiendas(c, clave, p["tienda"], ahora), reglas)
+              if a[0] == "MAS BARATO QUE OTRAS TIENDAS"]
+        nuevas = [(tipo, det) for tipo, det in al if not ya_avisada(c, p, tipo)]
+        if nuevas:
+            ya.add((p["tienda"], p["sku"]))
             pendientes.append((p, nuevas))
     c.commit()
 
@@ -790,12 +828,33 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
              "NUEVO FUERA DE RANGO",
              "MINIMO HISTORICO", "DESCUENTO INFLADO"]
     pendientes.sort(key=lambda x: orden.index(x[1][0][0]))
+    # primero lo que quedo sin enviar en corridas anteriores, si el precio sigue igual
+    previas = []
+    en_cola = {(p["tienda"], p["sku"]) for p, _ in pendientes}
+    for tienda_c, sku_c, precio_c, datos in c.execute("SELECT * FROM cola").fetchall():
+        actual = c.execute("SELECT ultimo_precio FROM productos WHERE tienda=? AND sku=?", (tienda_c, sku_c)).fetchone()
+        p, al = json.loads(datos)
+        al = [tuple(a) for a in al]
+        if (actual and abs(actual[0] - precio_c) < 0.5 and (tienda_c, sku_c) not in en_cola
+                and not all(ya_avisada(c, p, t) for t, _ in al)):
+            previas.append((p, al))
+    c.execute("DELETE FROM cola")
+    pendientes = previas + pendientes
     tope = reglas["max_alertas_por_corrida"]
+    for p, al in pendientes[tope:]:
+        c.execute("INSERT OR REPLACE INTO cola VALUES(?,?,?,?)",
+                  (p["tienda"], p["sku"], p["precio"], json.dumps([p, al], ensure_ascii=False)))
+    if barrido:
+        c.execute("INSERT OR REPLACE INTO meta VALUES('barrido', ?)", (ahora.isoformat(),))
     for p, al in pendientes[:tope]:
+        for tipo, _ in al:  # solo se registra lo que efectivamente se envia
+            c.execute("INSERT OR IGNORE INTO alertas VALUES(?,?,?,?,?)",
+                      (p["tienda"], p["sku"], tipo, p["precio"], ahora.isoformat()))
         enviar_telegram(armar_mensaje(p, al))
         time.sleep(0.4 if os.environ.get("TELEGRAM_TOKEN") else 0)
+    c.commit()
     if len(pendientes) > tope:
-        enviar_telegram(f"Hay {len(pendientes) - tope} alertas mas en esta corrida que no se enviaron (tope {tope}).")
+        enviar_telegram(f"Hay {len(pendientes) - tope} alertas mas; van llegando en las proximas corridas (tope {tope}).")
     n_prod = c.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
     print(f"Catalogo: {n_prod} productos. Alertas nuevas: {len(pendientes)}.")
     c.close()
