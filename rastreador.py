@@ -815,7 +815,10 @@ def ver(urls, patron=""):
             print(f"ERROR {type(e).__name__} {getattr(e, 'code', '')} {e}")
             continue
         print(f"final: {final} | {tipo} | {len(txt)} bytes")
-        if patron:
+        if patron.startswith("="):
+            unicos = sorted({m.group(0) for m in re.finditer(patron[1:], txt)})
+            print(f"  {len(unicos)} coincidencias: " + " ".join(unicos[:300]))
+        elif patron:
             vistos = set()
             for m in re.finditer(patron, txt):
                 frag = re.sub(r"\s+", " ", txt[max(0, m.start() - 150):m.end() + 250])
