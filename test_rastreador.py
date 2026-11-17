@@ -29,6 +29,8 @@ class Claves(unittest.TestCase):
 
     def test_ignora_unidades(self):
         self.assertEqual(r.clave_modelo("Celular Samsung 128GB 5000mAh", "Samsung"), "")
+        self.assertEqual(r.clave_modelo('Celular Samsung Galaxy A56 5g 8/256GB 6.6"', "Samsung"), "")
+        self.assertEqual(r.clave_modelo("Notebook HP 8/512gb 15-FD1340LA", "HP"), "HP:15FD1340LA")
 
     def test_ean(self):
         self.assertEqual(r.clave_modelo("x", "y", "7790001234567"), "EAN:7790001234567")
@@ -164,6 +166,27 @@ class Lectores(unittest.TestCase):
                 al, _ = r.correr(cfg, db, t0 + timedelta(days=10, hours=h), lector)
                 enviados += [p["sku"] for p, _ in al[:2]]
             self.assertEqual(sorted(enviados), ["0", "1", "2", "3", "4"])
+
+    def test_empareja_por_modelo_y_marca(self):
+        c = r.abrir(":memory:")
+        ahora = datetime(2026, 11, 1, tzinfo=timezone.utc)
+        for tienda, sku, titulo, marca, precio, ean in [
+                ("Naldo", "1", "Heladera Hisense 324l Rt320n3asa Inoxidable", "Hisense", 999999, "7791"),
+                ("OnCity", "2", "Heladera Hisense Rt320n3asa Inox", "HISENSE", 949999, ""),
+                ("Otra", "3", "Heladera Gafa Rt320n3asa", "Gafa", 100, ""),
+                ("Newsan", "4", "Heladera Hisense Top Mount 320L", "", 625999, "")]:
+            r.guardar(c, r._producto({"nombre": tienda, "url": "https://x"}, sku, titulo, precio, None, "", marca, ean),
+                      "", ahora, 60)
+        self.assertEqual(r.precios_otras_tiendas(c, "", "Newsan", ahora, sku="4"), [])
+        c.execute("UPDATE productos SET modelo='RT320N3ASA', marca='Hisense' WHERE tienda='Newsan'")
+        otras = sorted(r.precios_otras_tiendas(c, "", "Newsan", ahora, sku="4"))
+        self.assertEqual(otras, [("Naldo", 999999), ("OnCity", 949999)])
+
+    def test_modelo_desde_pagina(self):
+        pagina = '<td class="col data" data-th="Modelo">94RT320N3ASA</td><td data-th="Marca">HISENSE</td>'
+        m = r._RE_MODELO_PAGINA.search(pagina).group(1)
+        self.assertEqual(r.re.sub("^94", "", m), "RT320N3ASA")
+        self.assertEqual(r._RE_MARCA_PAGINA.search(pagina).group(1), "HISENSE")
 
     def test_cada_horas(self):
         cfg = {"tiendas": [{"nombre": "A", "url": "https://a.test", "cada_horas": 3}],

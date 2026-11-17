@@ -116,7 +116,8 @@ def clave_modelo(titulo, marca="", ean=""):
         limpio = re.sub(r"[^A-Za-z0-9]", "", t).upper()
         letras = sum(c.isalpha() for c in limpio)
         digitos = sum(c.isdigit() for c in limpio)
-        if len(limpio) >= 5 and letras >= 2 and digitos >= 2 and not _UNIDADES.match(t):
+        solo_capacidad = re.fullmatch(r"(ssd|ram|hdd|emmc|ddr\d?)?[\d/\-.,x+]+(gb|tb|mb|g|t)?(ram|ssd|hdd|emmc)?", t, re.I)
+        if len(limpio) >= 5 and letras >= 2 and digitos >= 2 and not _UNIDADES.match(t) and not solo_capacidad:
             candidatos.append(limpio)
     if not candidatos:
         return ""
@@ -125,6 +126,12 @@ def clave_modelo(titulo, marca="", ean=""):
     if m:
         return m + ":" + modelo
     return modelo if len(modelo) >= 7 else ""
+
+
+def modelo_de(titulo, marca=""):
+    """Codigo de modelo sin marca ni EAN (para emparejar con tiendas que no informan EAN)."""
+    k = clave_modelo(titulo, marca)
+    return k.split(":")[-1] if k else ""
 
 
 def es_accesorio(titulo, excluir):
@@ -453,6 +460,35 @@ def leer_magento_categorias(tienda, termino, max_paginas):
                                 lambda u, p: f"{u}?p={p}", tienda.get("max_paginas_categoria", 25))
 
 
+_RE_MODELO_PAGINA = re.compile(r'data-th="Modelo">\s*([^<\s]{4,40})\s*<')
+_RE_MARCA_PAGINA = re.compile(r'data-th="Marca">\s*([^<]{2,40}?)\s*<')
+
+
+def completar_modelos(c, tienda, maximo=120):
+    """Para tiendas sin EAN ni modelo en el titulo: lee la pagina del producto una sola vez."""
+    pendientes = c.execute("SELECT sku, url FROM productos WHERE tienda=? AND modelo='' AND url!='' LIMIT ?",
+                           (tienda["nombre"], maximo)).fetchall()
+    hechos = 0
+    for sku, url in pendientes:
+        try:
+            pagina = descargar(url, intentos=1)
+        except Exception:  # noqa: BLE001
+            continue
+        m = _RE_MODELO_PAGINA.search(pagina)
+        modelo = "-"
+        if m:
+            modelo = re.sub(tienda.get("quitar_prefijo_modelo", "^$"), "", m.group(1).upper())
+            modelo = re.sub(r"[^A-Z0-9]", "", modelo) or "-"
+        marca = _RE_MARCA_PAGINA.search(pagina)
+        c.execute("UPDATE productos SET modelo=?, marca=CASE WHEN marca='' THEN ? ELSE marca END "
+                  "WHERE tienda=? AND sku=?",
+                  (modelo, html.unescape(marca.group(1)).title() if marca else "", tienda["nombre"], sku))
+        hechos += 1
+        time.sleep(PAUSA / 2)
+    c.commit()
+    return hechos
+
+
 LECTORES_CATALOGO = {"shopify": leer_shopify, "compragamer": leer_compragamer, "gadnic": leer_gadnic,
                      "magento_categorias": leer_magento_categorias}
 
@@ -500,7 +536,13 @@ def abrir(ruta):
     if "cat_real" not in columnas:
         c.execute("ALTER TABLE productos ADD COLUMN cat_real TEXT DEFAULT ''")
         c.execute("ALTER TABLE productos ADD COLUMN propio INTEGER")
+    if "modelo" not in columnas:
+        c.execute("ALTER TABLE productos ADD COLUMN modelo TEXT DEFAULT ''")
+        for t, s_, ti, ma in c.execute("SELECT tienda, sku, titulo, marca FROM productos").fetchall():
+            c.execute("UPDATE productos SET modelo=? WHERE tienda=? AND sku=?", (modelo_de(ti, ma), t, s_))
+        c.commit()
     c.execute("CREATE INDEX IF NOT EXISTS i_cat ON productos(tienda, cat_real)")
+    c.execute("CREATE INDEX IF NOT EXISTS i_modelo ON productos(modelo)")
     if not c.execute("SELECT 1 FROM meta WHERE clave='limpieza1'").fetchone():
         # la primera corrida registro como enviadas ~340 alertas que nunca salieron por el tope
         c.execute("DELETE FROM alertas WHERE fecha < '2026-11-17T05:10'")
@@ -565,14 +607,15 @@ def guardar(c, p, categoria, ahora, dias_hist):
     if not p["marca"]:
         p["marca"] = inferir_marca(c, p["titulo"])
     clave = clave_modelo(p["titulo"], p["marca"], p["ean"])
+    modelo = modelo_de(p["titulo"], p["marca"])
     fila = c.execute("SELECT ultimo_precio, ultima_lista FROM productos WHERE tienda=? AND sku=?",
                      (t, sku)).fetchone()
     if fila is None:
         c.execute("INSERT INTO productos(tienda, sku, titulo, marca, clave, url, categoria, vendedor,"
-                  " primera_vez, ultima_vez, ultimo_precio, ultima_lista, cat_real, propio)"
-                  " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                  " primera_vez, ultima_vez, ultimo_precio, ultima_lista, cat_real, propio, modelo)"
+                  " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (t, sku, p["titulo"], p["marca"], clave, p["url"], categoria, p["vendedor"],
-                   iso, iso, p["precio"], p["lista"], p["cat_real"], p["propio"]))
+                   iso, iso, p["precio"], p["lista"], p["cat_real"], p["propio"], modelo))
         c.execute("INSERT INTO precios VALUES(?,?,?,?,?)", (t, sku, iso, p["precio"], p["lista"]))
         return []
     hist = None
@@ -581,19 +624,30 @@ def guardar(c, p, categoria, ahora, dias_hist):
         hist = historial(c, t, sku, ahora, dias_hist)
         c.execute("INSERT INTO precios VALUES(?,?,?,?,?)", (t, sku, iso, p["precio"], p["lista"]))
     c.execute("""UPDATE productos SET titulo=?, url=?, clave=?, vendedor=?, ultima_vez=?,
-                 ultimo_precio=?, ultima_lista=?, cat_real=?, propio=? WHERE tienda=? AND sku=?""",
+                 ultimo_precio=?, ultima_lista=?, cat_real=?, propio=?,
+                 modelo=CASE WHEN ?!='' THEN ? ELSE modelo END WHERE tienda=? AND sku=?""",
               (p["titulo"], p["url"], clave, p["vendedor"], iso, p["precio"], p["lista"],
-               p["cat_real"], p["propio"], t, sku))
+               p["cat_real"], p["propio"], modelo, modelo, t, sku))
     return hist
 
 
-def precios_otras_tiendas(c, clave, tienda, ahora, dias=3):
-    if not clave:
+def precios_otras_tiendas(c, clave, tienda, ahora, dias=3, sku=None):
+    """Precio mas bajo del mismo producto en cada una de las otras tiendas.
+
+    Empareja por EAN/clave, o por codigo de modelo de la misma marca (para tiendas sin EAN)."""
+    modelo, marca = "", ""
+    if sku is not None:
+        fila = c.execute("SELECT clave, modelo, marca FROM productos WHERE tienda=? AND sku=?", (tienda, sku)).fetchone()
+        if fila:
+            clave, modelo, marca = fila[0] or clave, fila[1] or "", (fila[2] or "").lower()
+    if not clave and not modelo:
         return []
     desde = (ahora - timedelta(days=dias)).isoformat()
-    return [(r[0], r[1]) for r in c.execute(
-        "SELECT tienda, MIN(ultimo_precio) FROM productos WHERE clave=? AND tienda!=? AND ultima_vez>=? "
-        "GROUP BY tienda", (clave, tienda, desde)) if r[1]]
+    filas = c.execute(
+        "SELECT tienda, MIN(ultimo_precio) FROM productos WHERE tienda!=? AND ultima_vez>=? AND "
+        "((clave=? AND clave!='') OR (modelo=? AND modelo!='' AND length(modelo)>=6 AND lower(marca)=? AND ?!=''))"
+        " GROUP BY tienda", (tienda, desde, clave, modelo, marca, marca))
+    return [(r[0], r[1]) for r in filas if r[1]]
 
 
 def precios_vecinos(c, p, ahora, reglas, dias=7):
@@ -775,6 +829,10 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
                 elif hist is not None:
                     cambiados.append((p, hist, b))
             time.sleep(PAUSA if lector is leer else 0)
+        if total and tienda.get("modelo_desde_pagina") and lector is leer:
+            n = completar_modelos(c, tienda)
+            if n:
+                print(f"  {tienda['nombre']}: modelo leido de {n} paginas de producto")
         if total:
             c.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", ("ultima:" + tienda["nombre"], ahora.isoformat()))
         c.commit()
@@ -790,7 +848,7 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
         aplica_piso = (not accesorio and b.get("piso") and " para " not in titulo
                        and any(w.lower() in inicio for w in b.get("debe_contener", [b["termino"]])))
         clave = clave_modelo(p["titulo"], p["marca"], p["ean"])
-        otras = [] if accesorio else precios_otras_tiendas(c, clave, p["tienda"], ahora)
+        otras = [] if accesorio else precios_otras_tiendas(c, clave, p["tienda"], ahora, sku=p["sku"])
         vecinos = [] if accesorio else precios_vecinos(c, p, ahora, reglas)
         al = evaluar(p["precio"], p["lista"], hist, otras, reglas, b["piso"] if aplica_piso else None,
                      vecinos, p["propio"])
@@ -803,7 +861,8 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     if barrido:
         desde = (ahora - timedelta(days=1)).isoformat()
         cols = ("tienda", "sku", "titulo", "marca", "url", "vendedor", "ultimo_precio", "ultima_lista", "propio")
-        for fila in c.execute(f"SELECT {', '.join(cols)} FROM productos WHERE clave!='' AND ultima_vez>=?",
+        for fila in c.execute(f"SELECT {', '.join(cols)} FROM productos WHERE (clave!='' OR modelo!='') "
+                              "AND ultima_vez>=?",
                               (desde,)).fetchall():
             d = dict(zip(cols, fila))
             solo_cruce.append({"tienda": d["tienda"], "sku": d["sku"], "titulo": d["titulo"], "marca": d["marca"],
@@ -814,9 +873,8 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     for p in solo_cruce:
         if (p["tienda"], p["sku"]) in ya or es_accesorio(p["titulo"], excluir):
             continue
-        clave = (c.execute("SELECT clave FROM productos WHERE tienda=? AND sku=?", (p["tienda"], p["sku"])).fetchone()
-                 or [""])[0]
-        al = [a for a in evaluar(p["precio"], None, [], precios_otras_tiendas(c, clave, p["tienda"], ahora), reglas)
+        otras = precios_otras_tiendas(c, "", p["tienda"], ahora, sku=p["sku"])
+        al = [a for a in evaluar(p["precio"], None, [], otras, reglas)
               if a[0] == "MAS BARATO QUE OTRAS TIENDAS"]
         nuevas = [(tipo, det) for tipo, det in al if not ya_avisada(c, p, tipo)]
         if nuevas:

@@ -169,7 +169,9 @@
       "nombre": "Tienda Newsan",
       "url": "https://tiendanewsan.com.ar",
       "lector": "magento_categorias",
-      "cada_horas": 1
+      "cada_horas": 1,
+      "modelo_desde_pagina": true,
+      "quitar_prefijo_modelo": "^\\d{2}(?=[A-Z])"
     },
     {
       "nombre": "Gadnic",
