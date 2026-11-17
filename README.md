@@ -3,7 +3,6 @@
 Recorre tiendas online cada 30 minutos, guarda el historial de precios y avisa por Telegram cuando encuentra:
 
 - **POSIBLE BUG**: el precio cae 45% o más contra su precio habitual.
-- **PRECIO ABSURDO**: queda por debajo del piso de la categoría.
 - **DESCUENTO EXTREMO**: 70% o más contra el precio de lista publicado.
 - **MAS BARATO QUE OTRAS TIENDAS**: 30% menos que la mediana del mismo modelo en otras tiendas.
 - **MINIMO HISTORICO**: 10% por debajo del mínimo anterior (oferta real).
@@ -20,7 +19,7 @@ Recorre tiendas online cada 30 minutos, guarda el historial de precios y avisa p
 
 Todo está en `tiendas.json`:
 
-- `busquedas`: qué se busca en cada tienda, con el `piso` de precio de cada categoría.
+- `busquedas`: qué se busca en cada tienda.
 - `tiendas`: las que se rastrean. `candidatas`: las que solo se prueban en el diagnóstico.
 - `reglas`: para cambiar umbrales, por ejemplo `{"caida_bug": 0.5}`. Los valores por defecto están en `REGLAS` dentro de `rastreador.py`.
 - `divisor` (por tienda): usar `100` si esa tienda publica los precios en centavos.

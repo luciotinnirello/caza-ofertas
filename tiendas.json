@@ -69,63 +69,31 @@
   "busquedas": [
     {
       "termino": "smart tv",
-      "categoria": "TV",
-      "piso": 90000,
-      "debe_contener": [
-        "tv",
-        "televisor"
-      ]
+      "categoria": "TV"
     },
     {
       "termino": "notebook",
-      "categoria": "Notebooks",
-      "piso": 250000,
-      "debe_contener": [
-        "notebook",
-        "laptop"
-      ]
+      "categoria": "Notebooks"
     },
     {
       "termino": "celular",
-      "categoria": "Celulares",
-      "piso": 50000,
-      "debe_contener": [
-        "celular",
-        "smartphone"
-      ]
+      "categoria": "Celulares"
     },
     {
       "termino": "monitor",
-      "categoria": "Monitores",
-      "piso": 60000,
-      "debe_contener": [
-        "monitor"
-      ]
+      "categoria": "Monitores"
     },
     {
       "termino": "heladera",
-      "categoria": "Heladeras",
-      "piso": 200000,
-      "debe_contener": [
-        "heladera"
-      ]
+      "categoria": "Heladeras"
     },
     {
       "termino": "lavarropas",
-      "categoria": "Lavarropas",
-      "piso": 120000,
-      "debe_contener": [
-        "lavarropas"
-      ]
+      "categoria": "Lavarropas"
     },
     {
       "termino": "aire acondicionado",
-      "categoria": "Aires",
-      "piso": 250000,
-      "debe_contener": [
-        "aire acondicionado",
-        "split"
-      ]
+      "categoria": "Aires"
     }
   ],
   "tiendas": [
