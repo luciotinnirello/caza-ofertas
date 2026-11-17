@@ -464,6 +464,17 @@ def enviar_telegram(texto):
         return False
 
 
+def enlace_mercadolibre(p):
+    """Link de busqueda en Mercado Libre para verificar el precio a mano."""
+    clave = clave_modelo(p["titulo"], p["marca"])
+    if clave and ":" in clave:
+        consulta = p["marca"] + " " + clave.split(":", 1)[1]
+    else:
+        consulta = " ".join(p["titulo"].split()[:7])
+    consulta = re.sub(r"[^\w\s]", " ", consulta, flags=re.UNICODE)
+    return "https://listado.mercadolibre.com.ar/" + urllib.parse.quote("-".join(consulta.split()))
+
+
 def armar_mensaje(p, alertas):
     e = html.escape
     lineas = [f"<b>{e(alertas[0][0])}</b> - {e(p['tienda'])}", e(p["titulo"]),
@@ -473,6 +484,7 @@ def armar_mensaje(p, alertas):
         lineas.append(f"Vende: {e(p['vendedor'])}")
     if p["url"]:
         lineas.append(e(p["url"]))
+    lineas.append('<a href="' + e(enlace_mercadolibre(p)) + '">Comparar en Mercado Libre</a>')
     return "\n".join(lineas)
 
 

@@ -148,6 +148,7 @@ class Corrida(unittest.TestCase):
             self.assertIn("PRECIO ABSURDO", tipos)
             self.assertIn("MAS BARATO QUE OTRAS TIENDAS", tipos)
             self.assertIn("50.000", r.armar_mensaje(*al[0]))
+            self.assertIn("https://listado.mercadolibre.com.ar/Samsung-QN55Q6FAAG", r.armar_mensaje(*al[0]))
             # no repite el aviso si el precio sigue igual
             al, _ = r.correr(cfg, db, t0 + timedelta(days=11, hours=1), lector)
             self.assertEqual(al, [])
