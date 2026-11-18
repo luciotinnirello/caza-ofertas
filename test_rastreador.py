@@ -188,6 +188,34 @@ class Lectores(unittest.TestCase):
         self.assertEqual(r.re.sub("^94", "", m), "RT320N3ASA")
         self.assertEqual(r._RE_MARCA_PAGINA.search(pagina).group(1), "HISENSE")
 
+    def test_aviso_tienda_caida(self):
+        cfg = {"tiendas": [{"nombre": "A", "url": "https://a.test"}], "busquedas": [{"termino": "x"}]}
+        estado = {"falla": False}
+        enviados = []
+        original = r.enviar_telegram
+        r.enviar_telegram = lambda texto: enviados.append(texto)
+
+        def lector(tienda, termino, mp):
+            if estado["falla"]:
+                raise OSError("403")
+            return [r._producto(tienda, "1", "Producto ABC123XY", 1000)], "p"
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                db = os.path.join(d, "p.db")
+                t0 = datetime(2026, 11, 1, tzinfo=timezone.utc)
+                r.correr(cfg, db, t0, lector)
+                estado["falla"] = True
+                r.correr(cfg, db, t0 + timedelta(hours=1), lector)
+                self.assertEqual(enviados, [])
+                r.correr(cfg, db, t0 + timedelta(hours=2), lector)
+                r.correr(cfg, db, t0 + timedelta(hours=3), lector)
+                self.assertEqual(len(enviados), 1)
+                estado["falla"] = False
+                r.correr(cfg, db, t0 + timedelta(hours=4), lector)
+                self.assertIn("volvio", enviados[-1])
+        finally:
+            r.enviar_telegram = original
+
     def test_cada_horas(self):
         cfg = {"tiendas": [{"nombre": "A", "url": "https://a.test", "cada_horas": 3}],
                "busquedas": [{"termino": "x"}]}

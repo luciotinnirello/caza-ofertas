@@ -796,7 +796,7 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     reglas.update(cfg.get("reglas") or {})
     excluir = cfg.get("excluir_titulos") or []
     c = abrir(ruta_db)
-    cambiados, vistos, resumen, solo_cruce = [], set(), [], []
+    cambiados, vistos, resumen, solo_cruce, caidas = [], set(), [], [], []
     for tienda in cfg["tiendas"]:
         if not tienda.get("activa", True):
             continue
@@ -833,6 +833,8 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
             n = completar_modelos(c, tienda)
             if n:
                 print(f"  {tienda['nombre']}: modelo leido de {n} paginas de producto")
+        if errores and not total:
+            caidas.append(tienda["nombre"])
         if total:
             c.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", ("ultima:" + tienda["nombre"], ahora.isoformat()))
         c.commit()
@@ -934,6 +936,20 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
     c.commit()
     if len(pendientes) > tope:
         enviar_telegram(f"Hay {len(pendientes) - tope} alertas mas; van llegando en las proximas corridas (tope {tope}).")
+    for nombre in caidas:
+        clave_err = "error:" + nombre
+        prev = int((c.execute("SELECT valor FROM meta WHERE clave=?", (clave_err,)).fetchone() or ["0"])[0])
+        c.execute("INSERT OR REPLACE INTO meta VALUES(?,?)", (clave_err, str(prev + 1)))
+        if prev + 1 == 2:  # avisa recien a la segunda falla seguida, para no alarmar por un corte puntual
+            enviar_telegram(f"⚠️ {html.escape(nombre)} no respondio en las ultimas 2 corridas "
+                            "(posible bloqueo o cambio en la web).")
+    for t in cfg["tiendas"]:
+        if t["nombre"] not in caidas:
+            fila = c.execute("SELECT valor FROM meta WHERE clave=?", ("error:" + t["nombre"],)).fetchone()
+            if fila and int(fila[0]) >= 2:
+                enviar_telegram(f"✅ {html.escape(t['nombre'])} volvio a responder.")
+            c.execute("DELETE FROM meta WHERE clave=?", ("error:" + t["nombre"],))
+    c.commit()
     n_prod = c.execute("SELECT COUNT(*) FROM productos").fetchone()[0]
     print(f"Catalogo: {n_prod} productos. Alertas nuevas: {len(pendientes)}.")
     c.close()

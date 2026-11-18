@@ -72,12 +72,22 @@ jobs:
           git commit --quiet -m "datos $(date -u +%FT%TZ)" || exit 0
           git push --quiet --force "$REPO_URL" datos
 
+      - name: Avisar si la corrida fallo
+        if: failure()
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s "https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            --data-urlencode "text=⚠️ Fallo una corrida del rastreador: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" > /dev/null
+
       - name: Encadenar la proxima corrida (el horario de GitHub es irregular)
-        if: (github.event.inputs.modo || 'correr') == 'correr' && github.event.inputs.solo == ''
+        if: always() && (github.event.inputs.modo || 'correr') == 'correr' && github.event.inputs.solo == ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sleep 1200
+          sleep 600
           otras=$(gh api "repos/${{ github.repository }}/actions/runs?per_page=20" \
             --jq '[.workflow_runs[] | select(.id != ${{ github.run_id }}) | select(.status=="queued" or .status=="pending" or .status=="waiting")] | length')
           if [ "$otras" -gt 0 ]; then echo "Ya hay otra corrida esperando turno; no se encadena."; exit 0; fi
