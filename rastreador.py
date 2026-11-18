@@ -1091,7 +1091,12 @@ def main():
     if a.comando == "diagnostico":
         diagnostico(cfg, "data/diagnostico.md")
     else:
-        correr(cfg, a.db)
+        # primero las tiendas rapidas (avisa enseguida); despues las lentas, que se leen cada varias horas
+        rapidas = [t for t in cfg["tiendas"] if not t.get("cada_horas")]
+        lentas = [t for t in cfg["tiendas"] if t.get("cada_horas")]
+        correr(dict(cfg, tiendas=rapidas), a.db)
+        if lentas:
+            correr(dict(cfg, tiendas=lentas), a.db)
 
 
 if __name__ == "__main__":
