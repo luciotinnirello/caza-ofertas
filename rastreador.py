@@ -670,6 +670,8 @@ REGLAS = {
     "dias_historial": 60,       # ventana de historia que se mira
     "caida_bug": 0.35,          # cae 35% o mas contra su precio habitual -> posible bug
     "min_dias_caida": 0.25,     # dias de historia necesarios para esa regla (6 horas)
+    "bug_vs_otras": 0.40,       # si el producto esta en otras tiendas: 40% por debajo de la mas barata
+    "tolerancia_correccion": 0.03,  # precio y lista bajan en la misma proporcion (+-3%) = correccion
     "descuento_extremo": 0.70,  # 70% o mas contra el precio de lista publicado
     "minimo_historico": 0.10,   # 10% por debajo del minimo anterior -> oferta real
     "min_dias_minimo": 7,
@@ -702,30 +704,46 @@ def evaluar(precio, lista, hist, otras, reglas=None, piso=None, vecinos=None, pr
     dias = sum(d for _, _, d in hist)
     med = mediana_ponderada([(p, d) for p, _, d in hist]) if hist else None
 
+    otras = [o if isinstance(o, tuple) else ("otra tienda", o) for o in otras or []]
     if piso and precio < piso:
         al.append(("PRECIO ABSURDO", f"por debajo del piso de la categoria ({pesos(piso)})"))
+    anterior, lista_anterior = (hist[-1][0], hist[-1][1]) if hist else (None, None)
     if med and dias >= r["min_dias_caida"] and precio <= med * (1 - r["caida_bug"]):
-        al.append(("POSIBLE BUG", f"cayo {round((1 - precio / med) * 100)}% contra su precio habitual ({pesos(med)})"))
-    if lista and precio <= lista * (1 - r["descuento_extremo"]):
+        det = f"cayo {round((1 - precio / med) * 100)}% contra su precio habitual ({pesos(med)})"
+        if otras:
+            # control cruzado: bajar hasta el precio de mercado no es un bug
+            t_min, p_min = min(otras, key=lambda o: o[1])
+            avisar = precio <= p_min * (1 - r["bug_vs_otras"])
+            det += f" y esta {round((1 - precio / p_min) * 100)}% debajo de la mas barata de las otras ({t_min} {pesos(p_min)})"
+        else:
+            proporcional = bool(lista and lista_anterior and anterior and
+                                abs((lista / lista_anterior) / (precio / anterior) - 1) <= r["tolerancia_correccion"])
+            # precio y lista bajan juntos = probable correccion de un precio inflado; solo avisa si
+            # ademas queda muy por debajo de su categoria
+            avisar = (not proporcional) or bool(vecinos and len(vecinos) >= r["min_vecinos"]
+                                                and precio < _percentil(sorted(vecinos), 0.10) * 0.5)
+        if avisar:
+            al.append(("POSIBLE BUG", det))
+    if (lista and anterior and precio < anterior * 0.98
+            and precio <= lista * (1 - r["descuento_extremo"])):
         al.append(("DESCUENTO EXTREMO", f"{round((1 - precio / lista) * 100)}% contra el precio de lista ({pesos(lista)})"))
-    otras = [o if isinstance(o, tuple) else ("otra tienda", o) for o in otras or []]
     if len(otras) >= r["min_otras_tiendas"]:
         m_otras = statistics.median(p for _, p in otras)
         t_min, p_min = min(otras, key=lambda o: o[1])
         if precio <= m_otras * (1 - r["otras_tiendas"]) and precio <= p_min * (1 - r["otras_tiendas_min"]):
             lista_otras = ", ".join(f"{t} {pesos(p)}" for t, p in sorted(otras, key=lambda o: o[1])[:4])
             al.append(("MAS BARATO QUE OTRAS TIENDAS",
-                       f"{round((1 - precio / m_otras) * 100)}% menos que la mediana de {len(otras)} tiendas "
+                       f"{round((1 - precio / m_otras) * 100)}% menos que la mediana de {len(otras)} tiendas rastreadas "
                        f"y {round((1 - precio / p_min) * 100)}% menos que la mas barata ({lista_otras})"))
     if vecinos and dias < r["min_dias_caida"]:
         v = sorted(vecinos)
         barato = _percentil(v, 0.10)
         factor = r["vecinos_factor_terceros"] if propio is False else r["vecinos_factor"]
-        if precio < barato * factor:
-            det = f"sin historial y muy por debajo de su categoria: lo barato habitual ronda {pesos(barato)} ({len(v)} productos)"
-            if barato <= precio * 10 <= _percentil(v, 0.90):
-                det += f"; con un digito mas ({pesos(precio * 10)}) seria un precio normal"
-            al.append(("NUEVO FUERA DE RANGO", det))
+        # solo el caso fuerte: parece un digito de menos (con un cero mas seria un precio normal)
+        if precio < barato * factor and barato <= precio * 10 <= _percentil(v, 0.90):
+            al.append(("NUEVO FUERA DE RANGO",
+                       f"sin historial y muy por debajo de su categoria (lo barato ronda {pesos(barato)}, "
+                       f"{len(v)} productos); con un digito mas ({pesos(precio * 10)}) seria un precio normal"))
     if hist and dias >= r["min_dias_minimo"]:
         minimo = min(p for p, _, _ in hist)
         maximo = max(p for p, _, _ in hist)
@@ -769,7 +787,8 @@ def enlace_mercadolibre(p):
 
 def armar_mensaje(p, alertas):
     e = html.escape
-    lineas = [f"<b>{e(alertas[0][0])}</b> - {e(p['tienda'])}", e(p["titulo"]),
+    titulos = {"MAS BARATO QUE OTRAS TIENDAS": "MAS BARATO QUE LAS TIENDAS RASTREADAS"}
+    lineas = [f"<b>{e(titulos.get(alertas[0][0], alertas[0][0]))}</b> - {e(p['tienda'])}", e(p["titulo"]),
               f"<b>{pesos(p['precio'])}</b>" + (f" (lista {pesos(p['lista'])})" if p["lista"] else "")]
     lineas += [f"- {e(t)}: {e(d)}" for t, d in alertas]
     if p["vendedor"] and p["vendedor"].lower() != p["tienda"].lower():
@@ -873,7 +892,8 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
                 "AND p.fecha=(SELECT max(fecha) FROM precios x WHERE x.tienda=p.tienda AND x.sku=p.sku)",
                 (desde_b,)).fetchall():
             hist_b = historial(c, t_b, sku_b, _fecha(f_b), reglas["dias_historial"])
-            al_b = [a for a in evaluar(precio_b, lista_b, hist_b, [], reglas) if a[0] == "POSIBLE BUG"]
+            otras_b = precios_otras_tiendas(c, "", t_b, ahora, sku=sku_b)
+            al_b = [a for a in evaluar(precio_b, lista_b, hist_b, otras_b, reglas) if a[0] == "POSIBLE BUG"]
             fila = c.execute("SELECT titulo, marca, url, vendedor, propio FROM productos WHERE tienda=? AND sku=?",
                              (t_b, sku_b)).fetchone()
             p_b = {"tienda": t_b, "sku": sku_b, "titulo": fila[0], "marca": fila[1] or "", "url": fila[2],

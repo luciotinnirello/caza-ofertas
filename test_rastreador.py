@@ -263,8 +263,28 @@ class Deteccion(unittest.TestCase):
         h = [(800000, None, 20), (560000, 800000, 10)]
         self.assertEqual(self.tipos(559000, 800000, h, []), [])
 
-    def test_descuento_extremo_sin_historia(self):
-        self.assertEqual(self.tipos(100000, 500000, [], []), ["DESCUENTO EXTREMO"])
+    def test_descuento_extremo_solo_si_bajo(self):
+        self.assertEqual(self.tipos(100000, 500000, [], []), [])
+        # "antes" inventado sin que baje el precio (Compra Gamer)
+        self.assertEqual(self.tipos(99797, 475222, [(99482, 473722, 1)], []), [])
+        self.assertIn("DESCUENTO EXTREMO", self.tipos(100000, 500000, [(130000, 500000, 1)], []))
+
+    def test_bug_con_control_cruzado(self):
+        h = [(3399999, None, 2)]
+        # baja a precio de mercado: no es bug
+        self.assertEqual(self.tipos(2119999, 3399999, h, [("Naldo", 2329999), ("OnCity", 2129999)]), [])
+        # muy por debajo de la mas barata: si
+        self.assertIn("POSIBLE BUG", self.tipos(1200000, None, h, [("Naldo", 2329999), ("OnCity", 2129999)]))
+
+    def test_correccion_proporcional_no_avisa(self):
+        h = [(294999, 393332, 2)]
+        self.assertEqual(self.tipos(69999, 93332, h, []), [])
+        v = [60000 + i * 3000 for i in range(20)]
+        self.assertEqual(self.tipos(69999, 93332, h, [], vecinos=v), [])
+        self.assertIn("POSIBLE BUG", self.tipos(20000, 26666, h, [], vecinos=v))
+        # sin precio de lista, o con lista que no acompana: avisa
+        self.assertIn("POSIBLE BUG", self.tipos(69999, None, h, []))
+        self.assertIn("POSIBLE BUG", self.tipos(69999, 393332, h, []))
 
     def test_otras_tiendas(self):
         self.assertEqual(self.tipos(300000, None, [], [500000, 520000]), ["MAS BARATO QUE OTRAS TIENDAS"])
@@ -283,7 +303,7 @@ class Deteccion(unittest.TestCase):
         self.assertEqual(self.tipos(250000, None, [], [], vecinos=v, propio=True), [])
         # vendedor externo: mas exigente
         self.assertEqual(self.tipos(100000, None, [], [], vecinos=v, propio=False), [])
-        self.assertEqual(self.tipos(100000, None, [], [], vecinos=v, propio=True), ["NUEVO FUERA DE RANGO"])
+        self.assertEqual(self.tipos(100000, None, [], [], vecinos=v, propio=True), [])  # sin digito faltante
         # con historial propio manda el historial
         self.assertEqual(self.tipos(35000, None, [(36000, None, 30)], [], vecinos=v), [])
 
