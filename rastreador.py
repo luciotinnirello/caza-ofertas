@@ -526,6 +526,8 @@ def abrir(ruta):
         CREATE INDEX IF NOT EXISTS i_precios ON precios(tienda, sku, fecha);
         CREATE INDEX IF NOT EXISTS i_clave ON productos(clave);
         CREATE TABLE IF NOT EXISTS meta(clave TEXT PRIMARY KEY, valor TEXT);
+        CREATE TABLE IF NOT EXISTS inflados(tienda TEXT, sku TEXT, fecha TEXT, precio REAL, lista REAL,
+            maximo REAL, PRIMARY KEY(tienda, sku, precio));
         CREATE TABLE IF NOT EXISTS cola(tienda TEXT, sku TEXT, precio REAL, datos TEXT,
             PRIMARY KEY(tienda, sku));
         CREATE TABLE IF NOT EXISTS alertas(
@@ -673,7 +675,8 @@ REGLAS = {
     "bug_vs_otras": 0.70,       # si el producto esta en otras tiendas: 70% por debajo de la mas barata
     "tolerancia_correccion": 0.03,  # precio y lista bajan en la misma proporcion (+-3%) = correccion
     "descuento_extremo": 0.70,  # 70% o mas contra el precio de lista publicado
-    "minimo_historico": 0.10,   # 10% por debajo del minimo anterior -> oferta real
+    "minimo_historico": 0.20,   # 20% por debajo del minimo anterior -> oferta real
+    "minimo_min_tiendas": 3,    # ...solo si esta en 3+ tiendas rastreadas o lo vende la tienda misma
     "min_dias_minimo": 7,
     "inflado_descuento": 0.20,  # dice 20% off o mas...
     "inflado_margen": 0.15,     # ...pero el "antes" supera en 15% al maximo que realmente cobro
@@ -688,7 +691,10 @@ REGLAS = {
     "max_alertas_por_corrida": 15,
     # tipos que no se envian por Telegram (se activaron solos al cumplirse 7 dias de historial y
     # mandaron ~550 avisos el 24/11, en plena semana previa a Black Friday)
-    "tipos_silenciados": ["DESCUENTO INFLADO", "MINIMO HISTORICO"],
+    "tipos_silenciados": ["DESCUENTO INFLADO"],  # va en el resumen diario, no como alerta suelta
+    "resumen_hora": 9,          # hora local del resumen diario de descuentos inflados
+    "resumen_cantidad": 10,
+    "resumen_min_descuento": 0.30,  # en el resumen, solo los que anuncian 30% off o mas
 }
 
 
@@ -750,7 +756,9 @@ def evaluar(precio, lista, hist, otras, reglas=None, piso=None, vecinos=None, pr
     if hist and dias >= r["min_dias_minimo"]:
         minimo = min(p for p, _, _ in hist)
         maximo = max(p for p, _, _ in hist)
-        if not any(t == "POSIBLE BUG" for t, _ in al) and precio <= minimo * (1 - r["minimo_historico"]):
+        confiable = propio is True or len(otras) + 1 >= r["minimo_min_tiendas"]
+        if (confiable and not any(t == "POSIBLE BUG" for t, _ in al)
+                and precio <= minimo * (1 - r["minimo_historico"])):
             al.append(("MINIMO HISTORICO", f"{round((1 - precio / minimo) * 100)}% debajo del minimo de {round(dias)} dias ({pesos(minimo)})"))
         if (lista and 1 - precio / lista >= r["inflado_descuento"]
                 and lista > maximo * (1 + r["inflado_margen"]) and precio >= med * 0.95):
@@ -803,6 +811,35 @@ def armar_mensaje(p, alertas):
 
 
 # ------------------------------------------------------------------ comandos
+
+def resumen_inflados(c, ahora, reglas):
+    """Una vez por dia: tiendas con descuentos ficticios y los casos mas llamativos."""
+    local = ahora - timedelta(hours=3)  # Argentina, UTC-3
+    hoy = local.date().isoformat()
+    ult = c.execute("SELECT valor FROM meta WHERE clave='resumen_inflados'").fetchone()
+    if local.hour < reglas["resumen_hora"] or (ult and ult[0] == hoy):
+        return None
+    c.execute("INSERT OR REPLACE INTO meta VALUES('resumen_inflados', ?)", (hoy,))
+    desde = (ahora - timedelta(days=1)).isoformat()
+    por_tienda = c.execute("SELECT tienda, COUNT(*) FROM inflados WHERE fecha>=? GROUP BY 1 ORDER BY 2 DESC",
+                           (desde,)).fetchall()
+    if not por_tienda:
+        return None
+    top = c.execute(
+        "SELECT i.tienda, p.titulo, i.precio, i.lista, i.maximo, p.url FROM inflados i JOIN productos p "
+        "USING(tienda, sku) WHERE i.fecha>=? AND 1 - i.precio / i.lista >= ? ORDER BY i.lista / i.maximo DESC LIMIT ?",
+        (desde, reglas["resumen_min_descuento"], reglas["resumen_cantidad"])).fetchall()
+    e = html.escape
+    lineas = ["<b>Resumen diario: descuentos inflados</b>",
+              "Productos cuyo precio \"antes\" supera lo que realmente costaron en los ultimos dias.", "",
+              "Por tienda (ultimas 24 h): " + ", ".join(f"{e(t)} {n}" for t, n in por_tienda)]
+    if top:
+        lineas += ["", "Los mas exagerados:"]
+        for t, titulo, precio, lista, maximo, url in top:
+            lineas.append(f"- {e(t)}: {e(titulo[:60])}. Dice {round((1 - precio / lista) * 100)}% off sobre "
+                          f"{pesos(lista)}; costo como maximo {pesos(maximo)} y hoy esta {pesos(precio)}. {e(url)}")
+    return "\n".join(lineas)
+
 
 def ya_avisada(c, p, tipo):
     return c.execute("SELECT 1 FROM alertas WHERE tienda=? AND sku=? AND tipo=? AND precio=?",
@@ -876,6 +913,9 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
         vecinos = [] if accesorio else precios_vecinos(c, p, ahora, reglas)
         al = evaluar(p["precio"], p["lista"], hist, otras, reglas, b["piso"] if aplica_piso else None,
                      vecinos, p["propio"])
+        if any(t == "DESCUENTO INFLADO" for t, _ in al) and hist:
+            c.execute("INSERT OR IGNORE INTO inflados VALUES(?,?,?,?,?,?)",
+                      (p["tienda"], p["sku"], ahora.isoformat(), p["precio"], p["lista"], max(h[0] for h in hist)))
         nuevas = [(tipo, det) for tipo, det in al
                   if tipo not in reglas["tipos_silenciados"] and not ya_avisada(c, p, tipo)]
         if nuevas:
@@ -951,6 +991,9 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
                   (p["tienda"], p["sku"], p["precio"], json.dumps([p, al], ensure_ascii=False)))
     if barrido:
         c.execute("INSERT OR REPLACE INTO meta VALUES('barrido', ?)", (ahora.isoformat(),))
+    texto_resumen = resumen_inflados(c, ahora, reglas)
+    if texto_resumen:
+        enviar_telegram(texto_resumen)
     for p, al in pendientes[:tope]:
         for tipo, _ in al:  # solo se registra lo que efectivamente se envia
             c.execute("INSERT OR IGNORE INTO alertas VALUES(?,?,?,?,?)",

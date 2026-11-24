@@ -216,6 +216,18 @@ class Lectores(unittest.TestCase):
         finally:
             r.enviar_telegram = original
 
+    def test_resumen_inflados(self):
+        c = r.abrir(":memory:")
+        t0 = datetime(2026, 11, 24, 11, 0, tzinfo=timezone.utc)  # 8:00 en Argentina
+        r.guardar(c, r._producto({"nombre": "Gadnic", "url": "https://x"}, "1", "Termo Mate", 50000, 73000,
+                                 "https://x/termo"), "", t0, 60)
+        c.execute("INSERT INTO inflados VALUES('Gadnic','1',?,50000,100000,52000)", (t0.isoformat(),))
+        self.assertIsNone(r.resumen_inflados(c, t0, r.REGLAS))           # antes de las 9
+        texto = r.resumen_inflados(c, t0 + timedelta(hours=1, minutes=5), r.REGLAS)
+        self.assertIn("Gadnic 1", texto)
+        self.assertIn("Termo Mate", texto)
+        self.assertIsNone(r.resumen_inflados(c, t0 + timedelta(hours=3), r.REGLAS))  # una vez por dia
+
     def test_cada_horas(self):
         cfg = {"tiendas": [{"nombre": "A", "url": "https://a.test", "cada_horas": 3}],
                "busquedas": [{"termino": "x"}]}
@@ -250,7 +262,11 @@ class Deteccion(unittest.TestCase):
         self.assertEqual(self.tipos(470000, None, self.H, []), [])
 
     def test_minimo_historico(self):
-        self.assertEqual(self.tipos(430000, None, self.H, []), ["MINIMO HISTORICO"])
+        # 20% bajo el minimo, solo si lo vende la tienda o esta en 3+ tiendas
+        self.assertEqual(self.tipos(390000, None, self.H, [], propio=True), ["MINIMO HISTORICO"])
+        self.assertEqual(self.tipos(390000, None, self.H, []), [])
+        self.assertEqual(self.tipos(390000, None, self.H, [("A", 410000), ("B", 420000)]), ["MINIMO HISTORICO"])
+        self.assertEqual(self.tipos(430000, None, self.H, [], propio=True), [])
 
     def test_poca_historia_no_avisa(self):
         self.assertEqual(self.tipos(140000, None, [(500000, None, 0.2)], []), [])
