@@ -244,7 +244,7 @@ class Deteccion(unittest.TestCase):
         return [t for t, _ in r.evaluar(*a, **k)]
 
     def test_bug(self):
-        self.assertEqual(self.tipos(200000, None, self.H, []), ["POSIBLE BUG"])
+        self.assertEqual(self.tipos(140000, None, self.H, []), ["POSIBLE BUG"])
 
     def test_baja_normal_no_avisa(self):
         self.assertEqual(self.tipos(470000, None, self.H, []), [])
@@ -253,8 +253,8 @@ class Deteccion(unittest.TestCase):
         self.assertEqual(self.tipos(430000, None, self.H, []), ["MINIMO HISTORICO"])
 
     def test_poca_historia_no_avisa(self):
-        self.assertEqual(self.tipos(200000, None, [(500000, None, 0.2)], []), [])
-        self.assertEqual(self.tipos(200000, None, [(500000, None, 0.6)], []), ["POSIBLE BUG"])
+        self.assertEqual(self.tipos(140000, None, [(500000, None, 0.2)], []), [])
+        self.assertEqual(self.tipos(140000, None, [(500000, None, 0.6)], []), ["POSIBLE BUG"])
 
     def test_descuento_inflado(self):
         self.assertEqual(self.tipos(500000, 800000, self.H, []), ["DESCUENTO INFLADO"])
@@ -274,7 +274,9 @@ class Deteccion(unittest.TestCase):
         # baja a precio de mercado: no es bug
         self.assertEqual(self.tipos(2119999, 3399999, h, [("Naldo", 2329999), ("OnCity", 2129999)]), [])
         # muy por debajo de la mas barata: si
-        self.assertIn("POSIBLE BUG", self.tipos(1200000, None, h, [("Naldo", 2329999), ("OnCity", 2129999)]))
+        self.assertIn("POSIBLE BUG", self.tipos(600000, None, h, [("Naldo", 2329999), ("OnCity", 2129999)]))
+        # 44% bajo la mas barata ya no alcanza (umbral 70%)
+        self.assertNotIn("POSIBLE BUG", self.tipos(1200000, None, h, [("Naldo", 2329999), ("OnCity", 2129999)]))
 
     def test_correccion_proporcional_no_avisa(self):
         h = [(294999, 393332, 2)]

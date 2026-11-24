@@ -668,9 +668,9 @@ def precios_vecinos(c, p, ahora, reglas, dias=7):
 
 REGLAS = {
     "dias_historial": 60,       # ventana de historia que se mira
-    "caida_bug": 0.35,          # cae 35% o mas contra su precio habitual -> posible bug
+    "caida_bug": 0.70,          # cae 70% o mas contra su precio habitual -> posible bug
     "min_dias_caida": 0.25,     # dias de historia necesarios para esa regla (6 horas)
-    "bug_vs_otras": 0.40,       # si el producto esta en otras tiendas: 40% por debajo de la mas barata
+    "bug_vs_otras": 0.70,       # si el producto esta en otras tiendas: 70% por debajo de la mas barata
     "tolerancia_correccion": 0.03,  # precio y lista bajan en la misma proporcion (+-3%) = correccion
     "descuento_extremo": 0.70,  # 70% o mas contra el precio de lista publicado
     "minimo_historico": 0.10,   # 10% por debajo del minimo anterior -> oferta real
@@ -686,6 +686,9 @@ REGLAS = {
     "vecinos_factor_terceros": 0.25,  # mas exigente si vende un tercero del marketplace
     "horas_barrido": 24,          # cada cuanto se compara todo el catalogo contra otras tiendas
     "max_alertas_por_corrida": 15,
+    # tipos que no se envian por Telegram (se activaron solos al cumplirse 7 dias de historial y
+    # mandaron ~550 avisos el 24/11, en plena semana previa a Black Friday)
+    "tipos_silenciados": ["DESCUENTO INFLADO", "MINIMO HISTORICO"],
 }
 
 
@@ -873,7 +876,8 @@ def correr(cfg, ruta_db, ahora=None, lector=leer):
         vecinos = [] if accesorio else precios_vecinos(c, p, ahora, reglas)
         al = evaluar(p["precio"], p["lista"], hist, otras, reglas, b["piso"] if aplica_piso else None,
                      vecinos, p["propio"])
-        nuevas = [(tipo, det) for tipo, det in al if not ya_avisada(c, p, tipo)]
+        nuevas = [(tipo, det) for tipo, det in al
+                  if tipo not in reglas["tipos_silenciados"] and not ya_avisada(c, p, tipo)]
         if nuevas:
             pendientes.append((p, nuevas))
     # barrido diario: compara contra otras tiendas aunque el precio no haya cambiado
